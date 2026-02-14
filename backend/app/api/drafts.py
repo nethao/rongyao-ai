@@ -56,7 +56,10 @@ async def get_draft(
         "wordpress_post_id": draft.wordpress_post_id,
         "created_at": draft.created_at,
         "updated_at": draft.updated_at,
-        "original_content": draft.submission.original_content
+        "original_content": draft.submission.original_content,
+        "original_html": draft.submission.original_html,
+        "email_subject": draft.submission.email_subject,
+        "content_source": draft.submission.content_source  # 添加内容来源
     }
     
     return draft_dict
@@ -78,7 +81,7 @@ async def update_draft(
         updated_draft = await draft_service.update_draft(
             draft_id=draft_id,
             content=draft_update.content,
-            user_id=current_user.id
+            created_by=current_user.id
         )
         return updated_draft
     except ValueError as e:

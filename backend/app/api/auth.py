@@ -16,7 +16,7 @@ from app.utils.auth import create_access_token
 from app.models.user import User
 from app.api.dependencies import get_current_user
 
-router = APIRouter(prefix="/api/auth", tags=["认证"])
+router = APIRouter(prefix="/auth", tags=["认证"])
 
 
 @router.post("/login", response_model=TokenResponse)

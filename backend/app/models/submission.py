@@ -16,10 +16,19 @@ class Submission(Base):
     email_from = Column(String(255))
     email_date = Column(DateTime(timezone=True))
     original_content = Column(Text, nullable=False)
+    original_html = Column(Text)  # 原始HTML（保留公众号排版）
     doc_file_path = Column(String(500))
     docx_file_path = Column(String(500))
     status = Column(String(20), nullable=False, default='pending')  # 'pending', 'processing', 'completed', 'failed'
     error_message = Column(Text)
+    
+    # 邮件解析元数据
+    cooperation_type = Column(String(20))  # 'free' 或 'partner'
+    media_type = Column(String(20))  # 'rongyao', 'shidai', 'zhengxian', 'zhengqi', 'toutiao'
+    source_unit = Column(String(255))  # 来稿单位
+    target_site_id = Column(Integer)  # 目标WordPress站点ID
+    content_source = Column(String(20))  # 'weixin', 'meipian', 'doc', 'docx', 'text'
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

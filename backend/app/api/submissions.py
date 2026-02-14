@@ -22,6 +22,10 @@ async def list_submissions(
     size: int = Query(20, ge=1, le=100, description="每页数量"),
     status: Optional[str] = Query(None, description="状态筛选"),
     search: Optional[str] = Query(None, description="搜索关键词"),
+    editor: Optional[str] = Query(None, description="采编筛选"),
+    cooperation: Optional[str] = Query(None, description="合作方式筛选"),
+    media: Optional[str] = Query(None, description="媒体类型筛选"),
+    unit: Optional[str] = Query(None, description="来稿单位筛选"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -41,6 +45,22 @@ async def list_submissions(
     # 状态筛选
     if status:
         query = query.where(Submission.status == status)
+    
+    # 采编筛选
+    if editor:
+        query = query.where(Submission.email_from.like(f"{editor}%"))
+    
+    # 合作方式筛选
+    if cooperation:
+        query = query.where(Submission.cooperation_type == cooperation)
+    
+    # 媒体类型筛选
+    if media:
+        query = query.where(Submission.media_type == media)
+    
+    # 来稿单位筛选
+    if unit:
+        query = query.where(Submission.source_unit == unit)
     
     # 关键词搜索
     if search:

@@ -9,7 +9,7 @@ from app.schemas.config import ConfigUpdate, ConfigVerifyResult
 from app.api.dependencies import require_admin
 from app.models.user import User
 
-router = APIRouter(prefix="/api/config", tags=["配置管理"])
+router = APIRouter(prefix="/config", tags=["配置管理"])
 
 
 @router.get("/", response_model=dict)

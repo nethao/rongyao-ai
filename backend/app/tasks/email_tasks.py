@@ -3,6 +3,7 @@
 """
 import os
 import tempfile
+from sqlalchemy import text
 from app.tasks import celery_app
 from app.database import AsyncSessionLocal
 from app.services.imap_fetcher import IMAPFetcher
@@ -71,8 +72,16 @@ async def process_email(email_data, doc_processor, oss_service):
         doc_processor: 文档处理器
         oss_service: OSS服务
     """
+    from app.services.email_parser import EmailParser, ContentType
+    from app.services.web_fetcher import WebFetcher
+    
     async with AsyncSessionLocal() as db:
         submission_service = SubmissionService(db)
+        
+        # 解析邮件标题
+        cooperation, media_type, source_unit, title = EmailParser.parse_subject(email_data.subject)
+        
+        logger.info(f"邮件解析结果 - 合作方式:{cooperation}, 媒体:{media_type}, 单位:{source_unit}, 标题:{title}")
         
         # 记录任务开始
         await submission_service.log_task(
@@ -83,36 +92,107 @@ async def process_email(email_data, doc_processor, oss_service):
         )
         
         try:
-            # 处理附件
+            # 检测内容类型
+            content_type = EmailParser.detect_content_type(email_data.body, email_data.attachments)
+            logger.info(f"内容类型: {content_type}")
+            
+            content = email_data.body
             doc_path = None
             docx_path = None
-            content = email_data.body
+            images_to_upload = []
+            original_html = None  # 保存原始HTML
             
-            for filename, file_data in email_data.attachments:
-                # 保存附件到临时文件
-                temp_file = tempfile.NamedTemporaryFile(
-                    delete=False,
-                    suffix=os.path.splitext(filename)[1]
-                )
-                temp_file.write(file_data)
-                temp_file.close()
-                
-                # 处理Word文档
-                if filename.lower().endswith('.doc'):
-                    doc_path = temp_file.name
-                    # 转换为docx
-                    docx_path = doc_processor.convert_doc_to_docx(doc_path)
-                    # 提取文本
-                    content = doc_processor.extract_text_from_docx(docx_path)
-                
-                elif filename.lower().endswith('.docx'):
-                    docx_path = temp_file.name
-                    # 提取文本
-                    content = doc_processor.extract_text_from_docx(docx_path)
+            # 根据内容类型处理
+            if content_type == ContentType.WEIXIN:
+                # 抓取公众号文章
+                url = EmailParser.extract_url(email_data.body, ContentType.WEIXIN)
+                if url:
+                    logger.info(f"抓取公众号文章: {url}")
+                    fetcher = WebFetcher()
+                    fetched_title, fetched_content, fetched_html, image_urls = fetcher.fetch_weixin_article(url)
+                    
+                    if fetched_content:
+                        content = fetched_content
+                        original_html = fetched_html  # 保存原始HTML
+                        # 优先使用抓取的标题
+                        if fetched_title:
+                            title = fetched_title
+                        
+                        # 下载图片
+                        for idx, img_url in enumerate(image_urls):
+                            img_data = fetcher.download_image(img_url)
+                            if img_data:
+                                images_to_upload.append((f"weixin_image_{idx}.jpg", img_data))
             
-            # 创建投稿记录
+            elif content_type == ContentType.MEIPIAN:
+                # 抓取美篇文章
+                url = EmailParser.extract_url(email_data.body, ContentType.MEIPIAN)
+                if url:
+                    logger.info(f"抓取美篇文章: {url}")
+                    fetcher = WebFetcher()
+                    fetched_title, fetched_content, image_urls, fetched_html = fetcher.fetch_meipian_article(url)
+                    
+                    if fetched_content:
+                        content = fetched_content
+                        original_html = fetched_html  # 保存HTML保持排版
+                        # 优先使用抓取的标题
+                        if fetched_title:
+                            title = fetched_title
+                        
+                        # 下载图片
+                        for idx, img_url in enumerate(image_urls):
+                            img_data = fetcher.download_image(img_url)
+                            if img_data:
+                                images_to_upload.append((f"meipian_image_{idx}.jpg", img_data))
+            
+            elif content_type == ContentType.WORD:
+                # 处理Word文档附件
+                for filename, file_data in email_data.attachments:
+                    # 保存附件到临时文件
+                    temp_file = tempfile.NamedTemporaryFile(
+                        delete=False,
+                        suffix=os.path.splitext(filename)[1]
+                    )
+                    temp_file.write(file_data)
+                    temp_file.close()
+                    
+                    # 处理Word文档
+                    if filename.lower().endswith('.doc'):
+                        doc_path = temp_file.name
+                        # 转换为docx
+                        docx_path = doc_processor.convert_doc_to_docx(doc_path)
+                        # 提取文本
+                        content = doc_processor.extract_text_from_docx(docx_path)
+                    
+                    elif filename.lower().endswith('.docx'):
+                        docx_path = temp_file.name
+                        # 提取文本
+                        content = doc_processor.extract_text_from_docx(docx_path)
+            
+            elif content_type == ContentType.VIDEO:
+                # 处理视频附件
+                for filename, file_data in email_data.attachments:
+                    if any(filename.lower().endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv']):
+                        logger.info(f"发现视频文件: {filename}, 大小: {len(file_data)/1024/1024:.2f}MB")
+                        # 将视频添加到待上传列表
+                        images_to_upload.append((filename, file_data))
+                        content = f"视频文件: {filename}"
+            
+            # 确定内容来源
+            if content_type == ContentType.WEIXIN:
+                content_source = 'weixin'
+            elif content_type == ContentType.MEIPIAN:
+                content_source = 'meipian'
+            elif doc_path:
+                content_source = 'doc'
+            elif docx_path:
+                content_source = 'docx'
+            else:
+                content_source = 'text'
+            
+            # 创建投稿记录（使用解析后的标题，保存原始HTML）
             submission = await submission_service.create_submission(
-                email_subject=email_data.subject,
+                email_subject=title or email_data.subject,
                 email_from=email_data.from_addr,
                 email_date=email_data.date,
                 original_content=content,
@@ -120,7 +200,135 @@ async def process_email(email_data, doc_processor, oss_service):
                 docx_file_path=docx_path
             )
             
-            # 提取并上传图片
+            # 更新content_source和original_html
+            update_data = {'id': submission.id}
+            if original_html:
+                update_data['html'] = original_html
+                logger.info(f"已保存原始HTML，长度: {len(original_html)}")
+            
+            await db.execute(
+                text('UPDATE submissions SET original_html = :html, content_source = :source WHERE id = :id'),
+                {'html': original_html, 'source': content_source, 'id': submission.id}
+            )
+            await db.commit()
+            
+            # 保存解析的元数据
+            if cooperation or media_type or source_unit:
+                site_id = EmailParser.get_wordpress_site_id(media_type) if media_type else None
+                
+                # 更新投稿记录的元数据
+                await db.execute(
+                    text('''
+                        UPDATE submissions 
+                        SET cooperation_type = :cooperation,
+                            media_type = :media,
+                            source_unit = :source,
+                            target_site_id = :site_id
+                        WHERE id = :id
+                    '''),
+                    {
+                        'cooperation': cooperation.value if cooperation else None,
+                        'media': media_type.value if media_type else None,
+                        'source': source_unit,
+                        'site_id': site_id,
+                        'id': submission.id
+                    }
+                )
+                await db.commit()
+                
+                logger.info(f"元数据已保存: 合作={cooperation}, 媒体={media_type}, 单位={source_unit}, 站点={site_id}")
+            
+            # 上传从网页抓取的图片并替换URL
+            url_mapping = {}  # 原始URL -> OSS URL的映射（用于 Markdown content）
+            oss_urls_ordered = []  # 按图片顺序的 OSS URL 列表（用于 HTML 按序替换）
+            original_image_urls = []  # 保存原始图片URL顺序
+            
+            for idx, (img_filename, img_data) in enumerate(images_to_upload):
+                try:
+                    oss_url, oss_key = oss_service.upload_file(
+                        file_data=img_data,
+                        filename=img_filename,
+                        folder=f"submissions/{submission.id}"
+                    )
+                    
+                    await submission_service.add_image(
+                        submission_id=submission.id,
+                        oss_url=oss_url,
+                        oss_key=oss_key,
+                        original_filename=img_filename,
+                        file_size=len(img_data)
+                    )
+                    
+                    oss_urls_ordered.append(oss_url)
+                    
+                    # 记录原始URL（从image_urls列表获取）
+                    if idx < len(image_urls):
+                        original_image_urls.append(image_urls[idx])
+                    
+                    # 记录URL映射（用于替换 Markdown content）
+                    if content_type in [ContentType.WEIXIN, ContentType.MEIPIAN]:
+                        import re
+                        pattern = rf'!\[图片{idx+1}\]\(([^\)]+)\)'
+                        match = re.search(pattern, content)
+                        if match:
+                            original_url = match.group(1)
+                            url_mapping[original_url] = oss_url
+                            
+                except Exception as e:
+                    logger.error(f"上传图片失败: {str(e)}")
+                    continue
+            
+            # 替换 Markdown content 中的图片URL为 OSS URL
+            if url_mapping:
+                for original_url, oss_url in url_mapping.items():
+                    content = content.replace(original_url, oss_url)
+            
+            # 美篇：从HTML生成图文混排的Markdown
+            if content_type == ContentType.MEIPIAN and original_html and oss_urls_ordered:
+                from bs4 import BeautifulSoup, NavigableString
+                soup = BeautifulSoup(original_html, 'html.parser')
+                content_tag = soup.find('div', {'class': 'mp-article-tpl'})
+                
+                if content_tag:
+                    markdown_parts = []
+                    img_index = 0
+                    
+                    # 遍历所有子元素，保持图文顺序
+                    for elem in content_tag.descendants:
+                        if elem.name == 'img' and img_index < len(oss_urls_ordered):
+                            markdown_parts.append(f'\n![图片{img_index+1}]({oss_urls_ordered[img_index]})\n')
+                            img_index += 1
+                        elif isinstance(elem, NavigableString) and elem.strip():
+                            elem_text = elem.strip()
+                            if elem_text and not elem_text.startswith('[IMAGE_'):
+                                markdown_parts.append(elem_text)
+                    
+                    content = '\n\n'.join([p for p in markdown_parts if p.strip()])
+                    logger.info(f"美篇Markdown已生成，保持图文混排，{img_index}张图片")
+            
+            # 公众号/美篇：替换HTML中的图片URL为OSS URL
+            if original_html and content_type in [ContentType.WEIXIN, ContentType.MEIPIAN] and len(oss_urls_ordered) > 0:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(original_html, 'html.parser')
+                imgs = soup.find_all('img')
+                for i, img in enumerate(imgs):
+                    if i < len(oss_urls_ordered):
+                        img['src'] = oss_urls_ordered[i]
+                        if img.get('data-src'):
+                            img['data-src'] = oss_urls_ordered[i]
+                original_html = str(soup)
+                logger.info(f"HTML已替换 {len(oss_urls_ordered)} 个图片URL为OSS地址")
+            
+            # 更新投稿内容和 HTML
+            if url_mapping or oss_urls_ordered:
+                await db.execute(
+                    text('UPDATE submissions SET original_content = :content, original_html = :html WHERE id = :id'),
+                    {'content': content, 'html': original_html, 'id': submission.id}
+                )
+                await db.commit()
+                logger.info(f"已替换 {len(oss_urls_ordered) or len(url_mapping)} 个图片URL为OSS地址")
+            
+            # 提取并上传Word文档中的图片
             if docx_path:
                 images = doc_processor.extract_images_from_docx(docx_path)
                 
@@ -146,6 +354,22 @@ async def process_email(email_data, doc_processor, oss_service):
                         logger.error(f"上传图片失败: {str(e)}")
                         continue
             
+            # 创建原文草稿（供编辑人员查看和手动编辑）
+            from app.services.draft_service import DraftService
+            draft_service = DraftService(db)
+            
+            # 公众号和美篇使用HTML格式，其他使用Markdown格式
+            if (content_type == ContentType.WEIXIN or content_type == ContentType.MEIPIAN) and original_html:
+                draft_content = original_html
+            else:
+                draft_content = content
+            
+            draft = await draft_service.create_draft(
+                submission_id=submission.id,
+                transformed_content=draft_content
+            )
+            logger.info(f"已创建原文草稿: draft_id={draft.id}, content_type={content_type}")
+            
             # 更新状态为completed
             await submission_service.update_status(submission.id, 'completed')
             
@@ -157,12 +381,7 @@ async def process_email(email_data, doc_processor, oss_service):
                 message=f"邮件处理成功: submission_id={submission.id}"
             )
             
-            logger.info(f"邮件处理成功: submission_id={submission.id}")
-            
-            # 触发AI转换任务
-            from app.tasks.transform_tasks import transform_content_task
-            transform_content_task.delay(submission.id)
-            logger.info(f"已触发AI转换任务: submission_id={submission.id}")
+            logger.info(f"邮件处理成功: submission_id={submission.id}, 等待编辑人员操作")
         
         except Exception as e:
             error_msg = f"邮件处理失败: {str(e)}"

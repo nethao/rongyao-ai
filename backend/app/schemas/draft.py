@@ -50,6 +50,9 @@ class DraftSchema(DraftBase):
 class DraftDetailSchema(DraftSchema):
     """草稿详情模型（包含原文）"""
     original_content: str  # 来自关联的submission
+    original_html: Optional[str] = None  # 公众号原始 HTML，用于还原排版
+    email_subject: Optional[str] = None  # 文章标题
+    content_source: Optional[str] = None  # 内容来源：weixin/meipian/word等
     
 
 class DraftVersionListResponse(BaseModel):

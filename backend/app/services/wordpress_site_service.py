@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.wordpress_site import WordPressSite
 from app.schemas.wordpress import WordPressSiteCreate, WordPressSiteUpdate
-from app.services.config_service import ConfigService
+from app.utils.encryption import encrypt_value, decrypt_value
 
 
 class WordPressSiteService:
@@ -14,7 +14,6 @@ class WordPressSiteService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.config_service = ConfigService(db)
 
     async def create_site(self, site_data: WordPressSiteCreate) -> WordPressSite:
         """
@@ -29,7 +28,7 @@ class WordPressSiteService:
         # 加密API密码
         api_password_encrypted = None
         if site_data.api_password:
-            api_password_encrypted = self.config_service.encrypt_value(site_data.api_password)
+            api_password_encrypted = encrypt_value(site_data.api_password)
 
         site = WordPressSite(
             name=site_data.name,
@@ -102,7 +101,7 @@ class WordPressSiteService:
         if site_data.api_username is not None:
             site.api_username = site_data.api_username
         if site_data.api_password is not None:
-            site.api_password_encrypted = self.config_service.encrypt_value(site_data.api_password)
+            site.api_password_encrypted = encrypt_value(site_data.api_password)
         if site_data.active is not None:
             site.active = site_data.active
 
@@ -143,4 +142,4 @@ class WordPressSiteService:
         if not site.api_password_encrypted:
             return None
         
-        return self.config_service.decrypt_value(site.api_password_encrypted)
+        return decrypt_value(site.api_password_encrypted)

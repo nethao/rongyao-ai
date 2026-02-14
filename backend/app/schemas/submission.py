@@ -14,7 +14,7 @@ class SubmissionImageSchema(BaseModel):
     oss_url: str
     original_filename: Optional[str] = None
     file_size: Optional[int] = None
-    compressed: bool = False
+    compressed: Optional[bool] = False
 
 
 class DraftSummarySchema(BaseModel):
@@ -48,6 +48,14 @@ class SubmissionSchema(SubmissionBase):
     docx_file_path: Optional[str] = None
     status: str
     error_message: Optional[str] = None
+    
+    # 邮件解析元数据
+    cooperation_type: Optional[str] = None  # 合作方式
+    media_type: Optional[str] = None  # 媒体类型
+    source_unit: Optional[str] = None  # 来稿单位
+    target_site_id: Optional[int] = None  # 目标站点ID
+    content_source: Optional[str] = None  # 内容来源: weixin, meipian, doc, docx, text
+    
     created_at: datetime
     updated_at: datetime
     images: List[SubmissionImageSchema] = []

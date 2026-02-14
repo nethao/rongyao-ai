@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 from datetime import datetime
 
+from sqlalchemy import text
 from app.tasks import celery_app
 from app.database import AsyncSessionLocal
 from app.services.llm_service import LLMService, LLMServiceError
@@ -34,6 +35,8 @@ def transform_content_task(self, submission_id: int):
         dict: 包含转换结果的字典
     """
     import asyncio
+    import nest_asyncio
+    nest_asyncio.apply()
     
     async def _transform():
         logger.info(f"开始AI转换任务: submission_id={submission_id}")
@@ -85,17 +88,45 @@ def transform_content_task(self, submission_id: int):
                     f"reference_date={reference_date}"
                 )
                 
-                # 调用LLM进行转换
+                # 提取原文中的图片标记并用占位符替换
+                import re
+                img_pattern = r'!\[图片\d+\]\([^\)]+\)'
+                original_images = re.findall(img_pattern, submission.original_content)
+                
+                # 用占位符替换图片，保留位置
+                text_with_placeholders = submission.original_content
+                for idx, img_md in enumerate(original_images):
+                    text_with_placeholders = text_with_placeholders.replace(
+                        img_md, 
+                        f'[IMAGE_PLACEHOLDER_{idx}]', 
+                        1  # 只替换第一个匹配
+                    )
+                
+                # 清理多余空行
+                text_with_placeholders = re.sub(r'\n{3,}', '\n\n', text_with_placeholders).strip()
+                
+                logger.info(
+                    f"原文处理: 总长度={len(submission.original_content)}, "
+                    f"带占位符={len(text_with_placeholders)}, 图片={len(original_images)}"
+                )
+                
+                # 调用LLM进行转换（包含占位符）
                 transformed_content = await llm_service.transform_text(
-                    text=submission.original_content,
+                    text=text_with_placeholders,
                     system_prompt=system_prompt,
                     temperature=0.7
                 )
                 
+                # 将占位符替换回图片Markdown
+                for idx, img_md in enumerate(original_images):
+                    placeholder = f'[IMAGE_PLACEHOLDER_{idx}]'
+                    transformed_content = transformed_content.replace(placeholder, f'\n{img_md}\n')
+                
                 logger.info(
                     f"AI转换完成: submission_id={submission_id}, "
                     f"原文长度={len(submission.original_content)}, "
-                    f"转换后长度={len(transformed_content)}"
+                    f"转换后长度={len(transformed_content)}, "
+                    f"图片数量={len(original_images)}"
                 )
                 
                 # 创建草稿记录

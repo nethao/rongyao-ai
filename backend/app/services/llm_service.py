@@ -62,26 +62,39 @@ class LLMTransformError(LLMServiceError):
 class LLMService:
     """LLM API客户端服务"""
     
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(
+        self, 
+        api_key: Optional[str] = None, 
+        model: Optional[str] = None,
+        base_url: Optional[str] = None
+    ):
         """
         初始化LLM服务
         
         Args:
             api_key: OpenAI API密钥，如果为None则从配置读取
             model: 使用的模型名称，如果为None则从配置读取
+            base_url: 自定义API端点，支持OpenRouter等中转API
         
         Raises:
             LLMConfigurationError: 如果API密钥未配置
         """
         self.api_key = api_key or settings.OPENAI_API_KEY
         self.model = model or settings.OPENAI_MODEL
+        self.base_url = base_url
         
         if not self.api_key:
             error_msg = "OpenAI API key is not configured"
             logger.error(error_msg)
             raise LLMConfigurationError(error_msg)
         
-        self.client = AsyncOpenAI(api_key=self.api_key)
+        # 创建客户端，支持自定义base_url
+        client_kwargs = {"api_key": self.api_key}
+        if self.base_url:
+            client_kwargs["base_url"] = self.base_url
+            logger.info(f"Using custom API endpoint: {self.base_url}")
+        
+        self.client = AsyncOpenAI(**client_kwargs)
         logger.info(f"LLM Service initialized with model: {self.model}")
     
     @classmethod
@@ -106,7 +119,9 @@ class LLMService:
         from app.services.config_service import ConfigService
         
         config_service = ConfigService(db)
-        api_key = await config_service.get_config("openai_api_key", decrypt=True)
+        api_key = await config_service.get_config("OPENAI_API_KEY", decrypt=True)
+        base_url = await config_service.get_config("OPENAI_BASE_URL")
+        model_name = await config_service.get_config("OPENAI_MODEL")
         
         if not api_key:
             # 如果数据库中没有配置，尝试从环境变量获取
@@ -117,8 +132,8 @@ class LLMService:
             logger.error(error_msg)
             raise LLMConfigurationError(error_msg)
         
-        logger.info("LLM Service created from ConfigService")
-        return cls(api_key=api_key, model=model)
+        logger.info(f"LLM Service created from ConfigService: base_url={base_url}, model={model_name or model}")
+        return cls(api_key=api_key, base_url=base_url, model=model_name or model)
     
     def _validate_response_structure(self, response) -> None:
         """
@@ -160,18 +175,30 @@ class LLMService:
         if not transformed or not transformed.strip():
             raise LLMTransformError("Transformed content is empty")
         
-        # 检查转换后内容长度是否合理（不应该比原文短太多或长太多）
+        # 检查转换后内容长度是否合理
         original_len = len(original.strip())
         transformed_len = len(transformed.strip())
         
-        # 允许±50%的长度变化
-        min_length = int(original_len * 0.5)
+        # 计算原文中的图片标记数量
+        img_markers_count = original.count('![图片')
+        
+        # 如果原文包含大量图片标记，放宽长度限制
+        if img_markers_count > 10:
+            # 有大量图片时，只检查纯文本部分
+            # 估算纯文本长度（假设每个图片标记约100字符）
+            estimated_text_len = original_len - (img_markers_count * 100)
+            min_length = max(100, int(estimated_text_len * 0.3))  # 至少30%的文本
+        else:
+            # 正常情况：允许±50%的长度变化
+            min_length = int(original_len * 0.5)
+        
         max_length = int(original_len * 1.5)
         
         if transformed_len < min_length:
             logger.warning(
                 f"Transformed content is too short: {transformed_len} chars "
-                f"(original: {original_len} chars, min expected: {min_length})"
+                f"(original: {original_len} chars, min expected: {min_length}, "
+                f"img_markers: {img_markers_count})"
             )
             raise LLMTransformError(
                 f"Transformed content is too short ({transformed_len} chars), "

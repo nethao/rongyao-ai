@@ -41,3 +41,7 @@ celery_app.conf.beat_schedule = {
 
 # 导入任务模块（在应用启动时自动发现）
 celery_app.autodiscover_tasks(["app.tasks"])
+
+# 显式导入所有任务
+from app.tasks.email_tasks import fetch_emails_task  # noqa
+from app.tasks.transform_tasks import transform_content_task  # noqa

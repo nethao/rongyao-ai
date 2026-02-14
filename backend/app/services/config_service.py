@@ -145,14 +145,22 @@ class ConfigService:
         Returns:
             bool: 配置是否有效
         """
-        api_key = await self.get_config("openai_api_key", decrypt=True)
+        api_key = await self.get_config("OPENAI_API_KEY", decrypt=True)
         if not api_key:
             return False
+        
+        # 获取可选的自定义端点和模型
+        base_url = await self.get_config("OPENAI_BASE_URL")
+        model = await self.get_config("OPENAI_MODEL")
         
         # 实际验证API密钥有效性
         try:
             from app.services.llm_service import LLMService
-            llm_service = LLMService(api_key=api_key)
+            llm_service = LLMService(
+                api_key=api_key,
+                model=model,
+                base_url=base_url
+            )
             is_valid = await llm_service.verify_connection()
             await llm_service.close()
             return is_valid
@@ -163,25 +171,52 @@ class ConfigService:
     
     async def verify_oss_config(self) -> bool:
         """验证OSS配置"""
-        access_key = await self.get_config("oss_access_key_id", decrypt=True)
-        secret_key = await self.get_config("oss_access_key_secret", decrypt=True)
-        endpoint = await self.get_config("oss_endpoint")
-        bucket = await self.get_config("oss_bucket_name")
+        access_key = await self.get_config("OSS_ACCESS_KEY_ID", decrypt=True)
+        secret_key = await self.get_config("OSS_ACCESS_KEY_SECRET", decrypt=True)
+        endpoint = await self.get_config("OSS_ENDPOINT")
+        bucket = await self.get_config("OSS_BUCKET_NAME")
         
         if not all([access_key, secret_key, endpoint, bucket]):
             return False
         
-        # TODO: 实际验证OSS连接
-        return True
+        # 实际验证OSS连接
+        try:
+            import oss2
+            auth = oss2.Auth(access_key, secret_key)
+            bucket_obj = oss2.Bucket(auth, endpoint, bucket)
+            
+            # 尝试列举bucket（只获取1个对象来测试连接）
+            result = bucket_obj.list_objects(max_keys=1)
+            # 访问result的属性来触发实际请求
+            _ = result.object_list
+            return True
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"OSS config verification failed: {e}")
+            return False
     
     async def verify_imap_config(self) -> bool:
         """验证IMAP配置"""
-        host = await self.get_config("imap_host")
-        user = await self.get_config("imap_user")
-        password = await self.get_config("imap_password", decrypt=True)
+        host = await self.get_config("IMAP_HOST")
+        port = await self.get_config("IMAP_PORT")
+        user = await self.get_config("IMAP_USER")
+        password = await self.get_config("IMAP_PASSWORD", decrypt=True)
+        use_ssl = await self.get_config("IMAP_USE_SSL")
         
         if not all([host, user, password]):
             return False
         
-        # TODO: 实际验证IMAP连接
-        return True
+        # 实际验证IMAP连接
+        try:
+            from imap_tools import MailBox
+            port_int = int(port) if port else 993
+            use_ssl_bool = use_ssl != 'false'
+            
+            # 尝试连接
+            with MailBox(host, port_int).login(user, password, initial_folder='INBOX'):
+                pass  # 连接成功
+            return True
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"IMAP config verification failed: {e}")
+            return False

@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost/glory_audit"
     
     # Redis配置
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://redis:6379/0"
     
     # JWT配置
     JWT_SECRET_KEY: str = "your-secret-key-change-in-production"
@@ -42,8 +42,8 @@ class Settings(BaseSettings):
     IMAP_USE_SSL: bool = True
     
     # Celery配置
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    CELERY_BROKER_URL: str = "redis://redis:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://redis:6379/0"
     
     # 文件存储配置
     TEMP_FILE_DIR: str = "/tmp/glory_audit"

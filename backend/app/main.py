@@ -21,12 +21,12 @@ app.add_middleware(
 )
 
 # 注册路由
-app.include_router(auth.router)
-app.include_router(config.router)
-app.include_router(submissions.router)
-app.include_router(drafts.router)
-app.include_router(wordpress_sites.router)
-app.include_router(monitoring.router)
+app.include_router(auth.router, prefix="/api")
+app.include_router(config.router, prefix="/api")
+app.include_router(submissions.router, prefix="/api")
+app.include_router(drafts.router, prefix="/api")
+app.include_router(wordpress_sites.router, prefix="/api")
+app.include_router(monitoring.router, prefix="/api")
 
 
 @app.get("/")

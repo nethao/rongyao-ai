@@ -13,7 +13,7 @@ from app.models.user import User
 from app.models.task_log import TaskLog
 from app.api.dependencies import require_admin
 
-router = APIRouter(prefix="/api/monitoring", tags=["系统监控"])
+router = APIRouter(prefix="/monitoring", tags=["系统监控"])
 
 
 class TaskLogSchema(BaseModel):
@@ -142,6 +142,28 @@ async def get_system_stats(
         failed_tasks_24h=failed_tasks_24h,
         successful_tasks_24h=successful_tasks_24h
     )
+
+
+@router.post("/fetch-emails")
+async def trigger_fetch_emails(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    手动触发邮件抓取（仅管理员）
+    """
+    from app.tasks.email_tasks import fetch_emails_task
+    
+    try:
+        # 触发邮件抓取任务
+        result = fetch_emails_task()
+        return {
+            "success": True,
+            "message": "邮件抓取任务已执行",
+            "result": result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"邮件抓取失败: {str(e)}")
 
 
 @router.get("/health")

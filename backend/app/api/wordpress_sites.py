@@ -24,7 +24,7 @@ class VerifyResult(BaseModel):
     valid: bool
     message: Optional[str] = None
 
-router = APIRouter(prefix="/api/wordpress/sites", tags=["WordPress站点"])
+router = APIRouter(prefix="/wordpress-sites", tags=["WordPress站点"])
 
 
 @router.post("", response_model=WordPressSite, status_code=status.HTTP_201_CREATED)
@@ -96,6 +96,49 @@ async def update_wordpress_site(
         )
     
     return site
+
+
+@router.post("/{site_id}/test", response_model=VerifyResult)
+async def test_wordpress_connection(
+    site_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    测试WordPress站点连接
+    """
+    site_service = WordPressSiteService(db)
+    site = await site_service.get_site(site_id)
+    
+    if not site:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="站点不存在"
+        )
+    
+    # 获取解密后的密码
+    password = site_service.get_decrypted_password(site)
+    
+    if not site.api_username or not password:
+        return VerifyResult(
+            valid=False,
+            message="站点缺少用户名或密码配置"
+        )
+    
+    # 测试连接
+    wp_service = WordPressService(site, password)
+    try:
+        success, message = await wp_service.verify_connection()
+        return VerifyResult(
+            valid=success,
+            message=message or ("连接成功" if success else "连接失败")
+        )
+    except Exception as e:
+        return VerifyResult(
+            valid=False,
+            message=f"连接失败: {str(e)}"
+        )
+
 
 
 @router.delete("/{site_id}", status_code=status.HTTP_204_NO_CONTENT)

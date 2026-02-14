@@ -31,13 +31,14 @@ class OSSService:
             endpoint: OSS端点
             bucket_name: 存储桶名称
         """
+        # 最后使用环境变量作为后备
         self.access_key_id = access_key_id or settings.OSS_ACCESS_KEY_ID
         self.access_key_secret = access_key_secret or settings.OSS_ACCESS_KEY_SECRET
         self.endpoint = endpoint or settings.OSS_ENDPOINT
         self.bucket_name = bucket_name or settings.OSS_BUCKET_NAME
         
         if not all([self.access_key_id, self.access_key_secret, self.endpoint, self.bucket_name]):
-            raise ValueError("OSS配置不完整，请检查环境变量")
+            raise ValueError("OSS配置不完整，请检查环境变量或数据库配置")
         
         # 创建认证对象
         self.auth = oss2.Auth(self.access_key_id, self.access_key_secret)

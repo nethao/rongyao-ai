@@ -11,6 +11,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    allowedHosts: ['e.com', 'a.com', 'b.com', 'c.com', 'd.com'],
     proxy: {
       '/api': {
         target: 'http://backend:8000',

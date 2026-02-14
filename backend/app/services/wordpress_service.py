@@ -8,6 +8,14 @@ from app.models.wordpress_site import WordPressSite
 
 class WordPressService:
     """WordPress REST API客户端"""
+    
+    # URL映射：外部域名 -> 容器名
+    URL_MAPPING = {
+        'http://a.com': 'http://wp_a',
+        'http://b.com': 'http://wp_b',
+        'http://c.com': 'http://wp_c',
+        'http://d.com': 'http://wp_d',
+    }
 
     def __init__(self, site: WordPressSite, api_password: str):
         """
@@ -18,10 +26,14 @@ class WordPressService:
             api_password: 解密后的API密码
         """
         self.site = site
-        self.base_url = site.url.rstrip('/')
-        self.api_url = f"{self.base_url}/wp-json/wp/v2"
+        # 使用容器内部URL
+        external_url = site.url.rstrip('/')
+        self.base_url = self.URL_MAPPING.get(external_url, external_url)
+        # 使用查询参数方式访问REST API（兼容未启用固定链接的WordPress）
+        self.api_url = f"{self.base_url}/?rest_route=/wp/v2"
         self.username = site.api_username
-        self.password = api_password
+        # 移除应用程序密码中的空格
+        self.password = api_password.replace(' ', '') if api_password else api_password
 
     async def verify_connection(self) -> tuple[bool, Optional[str]]:
         """
@@ -34,12 +46,14 @@ class WordPressService:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 # 尝试访问WordPress REST API根端点
                 response = await client.get(
-                    f"{self.base_url}/wp-json",
+                    f"{self.base_url}/?rest_route=/",
                     auth=(self.username, self.password) if self.username else None
                 )
                 
                 if response.status_code == 200:
-                    return True, None
+                    data = response.json()
+                    site_name = data.get('name', '未知站点')
+                    return True, f"连接成功！站点: {site_name}"
                 else:
                     return False, f"HTTP {response.status_code}: {response.text[:200]}"
                     

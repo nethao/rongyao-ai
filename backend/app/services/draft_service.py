@@ -2,6 +2,7 @@
 草稿管理服务
 """
 import logging
+import re
 from typing import Optional, List
 from datetime import datetime
 from sqlalchemy import select, desc
@@ -26,6 +27,87 @@ class DraftService:
             db: 数据库会话
         """
         self.db = db
+    
+    def format_content_for_wordpress(self, content: str) -> str:
+        """
+        格式化内容以适配WordPress发布
+        - 识别Markdown标题并转换为HTML标签（## -> <h2>, ### -> <h3>）
+        - 识别中文标题格式（一、二、三、或（一）（二））
+        - 为普通段落添加<p>标签和首行缩进
+        - 保留图片标记
+        
+        Args:
+            content: 原始内容（Markdown或纯文本格式）
+        
+        Returns:
+            格式化后的HTML内容
+        """
+        # 如果内容已经包含HTML标签，清理图片的<p>包裹后直接返回
+        if '<p' in content or '<h2' in content or '<h3' in content:
+            logger.info("内容已包含HTML标签，清理图片<p>标签后返回")
+            # 移除图片周围的<p>标签
+            content = re.sub(r'<p[^>]*>\s*(!\[图片\d+\][^\n]+)\s*</p>', r'\1', content)
+            # 清理连续空行
+            content = re.sub(r'\n{2,}', '\n', content)
+            return content
+        
+        # 清理多余空行（3个以上连续换行 -> 2个）
+        content = re.sub(r'\n{3,}', '\n\n', content)
+        
+        # 预处理：标记图片行，避免被包裹<p>标签
+        content = re.sub(r'(!\[图片\d+\]\([^\)]+\))', r'__IMG_START__\1__IMG_END__', content)
+        
+        lines = content.split('\n')
+        formatted_lines = []
+        
+        # 中文标题模式
+        h2_pattern = re.compile(r'^[一二三四五六七八九十]+、.+')  # 一、二、三、
+        h3_pattern = re.compile(r'^（[一二三四五六七八九十]+）.+')  # （一）（二）
+        h3_pattern2 = re.compile(r'^\d+\..+')  # 1. 2. 3.
+        
+        for line in lines:
+            line = line.strip()
+            
+            # 空行：跳过
+            if not line:
+                continue
+            
+            # 图片标记：恢复并保持原样
+            if '__IMG_START__' in line:
+                img_line = re.sub(r'__IMG_START__|__IMG_END__', '', line)
+                formatted_lines.append(img_line)
+            # Markdown标题：转换为HTML
+            elif line.startswith('####'):
+                title = line.replace('####', '').strip()
+                formatted_lines.append(f'<h4>{title}</h4>')
+            elif line.startswith('###'):
+                title = line.replace('###', '').strip()
+                formatted_lines.append(f'<h3>{title}</h3>')
+            elif line.startswith('##'):
+                title = line.replace('##', '').strip()
+                formatted_lines.append(f'<h2>{title}</h2>')
+            elif line.startswith('#'):
+                title = line.replace('#', '').strip()
+                formatted_lines.append(f'<h2>{title}</h2>')
+            # 中文标题：一、二、三、
+            elif h2_pattern.match(line):
+                formatted_lines.append(f'<h2>{line}</h2>')
+            # 中文标题：（一）（二）或 1. 2.
+            elif h3_pattern.match(line) or h3_pattern2.match(line):
+                formatted_lines.append(f'<h3>{line}</h3>')
+            # 普通段落：添加<p>标签和首行缩进
+            else:
+                formatted_lines.append(f'<p style="text-indent: 2em;">{line}</p>')
+        
+        result = '\n'.join(formatted_lines)
+        
+        # 清理连续空行（保留单个换行用于分隔）
+        result = re.sub(r'\n{2,}', '\n', result)
+        
+        # 后处理：移除图片周围的<p>标签
+        result = re.sub(r'<p[^>]*>\s*(!\[图片\d+\][^\n]+)\s*</p>', r'\1', result)
+        
+        return result
     
     async def create_draft(
         self,
@@ -78,10 +160,13 @@ class DraftService:
                 created_by=created_by
             )
         
+        # 格式化内容（添加HTML标签和首行缩进）
+        formatted_content = self.format_content_for_wordpress(transformed_content)
+        
         # 创建草稿记录
         draft = Draft(
             submission_id=submission_id,
-            current_content=transformed_content,
+            current_content=formatted_content,
             current_version=1,
             status='draft'
         )
@@ -93,7 +178,7 @@ class DraftService:
         version = DraftVersion(
             draft_id=draft.id,
             version_number=1,
-            content=transformed_content,
+            content=formatted_content,
             created_by=created_by
         )
         
