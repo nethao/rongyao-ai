@@ -1,0 +1,9 @@
+数据库迁移目录
+
+使用Alembic管理数据库schema变更。
+
+常用命令：
+- 创建迁移: alembic revision --autogenerate -m "描述"
+- 应用迁移: alembic upgrade head
+- 回退迁移: alembic downgrade -1
+- 查看历史: alembic history
