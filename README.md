@@ -1,5 +1,12 @@
 # 荣耀AI审核发布系统 (Glory AI Audit System)
 
+[![GitHub](https://img.shields.io/badge/GitHub-rongyao--ai-blue?logo=github)](https://github.com/nethao/rongyao-ai)
+[![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110.0-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
+[![Vue.js](https://img.shields.io/badge/Vue.js-3-4FC08D?logo=vue.js)](https://vuejs.org/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 自动化内容处理与发布平台，用于多站点WordPress投稿管理。
 
 ## 功能特性
@@ -34,8 +41,8 @@
 
 1. 克隆项目
 ```bash
-git clone <repository-url>
-cd glory-ai-audit-system
+git clone https://github.com/nethao/rongyao-ai.git
+cd rongyao-ai
 ```
 
 2. 配置环境变量
