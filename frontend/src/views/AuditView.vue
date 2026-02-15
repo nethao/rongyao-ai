@@ -386,11 +386,6 @@ const loadDraft = async () => {
     
     editableContent.value = response.current_content
     editableHtml.value = processedContent
-    
-    // 视频类型默认显示源码模式
-    if (isVideo) {
-      showSourceCode.value = true
-    }
 
     // 优先使用原始HTML，否则转换Markdown
     if (response.original_html) {

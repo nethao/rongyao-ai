@@ -27,6 +27,7 @@ import Image from '@tiptap/extension-image'
 import TextAlign from '@tiptap/extension-text-align'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
+import { Video } from './VideoExtension.js'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -43,6 +44,7 @@ const editor = useEditor({
       heading: { levels: [1, 2, 3, 4] },
     }),
     Image.configure({ inline: false, allowBase64: true }),
+    Video,
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
     Underline,
     Link.configure({ openOnClick: false }),
@@ -349,6 +351,20 @@ defineExpose({ getHTML, setHTML, editor })
 .tiptap-content :deep(.tiptap img:hover) {
   opacity: 0.9;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+/* 视频样式 */
+.tiptap-content :deep(.tiptap video) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 1em 0;
+  display: block;
+}
+
+.tiptap-content :deep(.tiptap video:focus) {
+  outline: 2px solid #409eff;
+  outline-offset: 2px;
 }
 
 .tiptap-content :deep(.tiptap blockquote) {
