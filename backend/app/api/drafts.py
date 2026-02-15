@@ -58,7 +58,11 @@ async def get_draft(
     
     # === Hydration：把 [[IMG_N]] 转为 <img>，前端直接展示 ===
     content_to_hydrate = draft.ai_content_md or draft.current_content or ""
-    if content_to_hydrate and media_map:
+    
+    # 视频类型直接使用HTML内容，不需要hydrate
+    if draft.submission.content_source == 'video':
+        current_content = content_to_hydrate
+    elif content_to_hydrate and media_map:
         current_content = ContentProcessor.hydrate(content_to_hydrate, media_map)
     elif draft.ai_content_md:
         current_content = ContentProcessor.hydrate(draft.ai_content_md, {})
