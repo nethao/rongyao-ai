@@ -379,7 +379,8 @@ const loadDraft = async () => {
 
     // 编辑器内容：后端已做 Hydration（占位符→img），直接使用；无 media_map 时按旧数据转 HTML
     const hasPlaceholders = response.media_map && Object.keys(response.media_map).length > 0
-    const processedContent = hasPlaceholders
+    const isVideo = response.content_source === 'video'
+    const processedContent = hasPlaceholders || isVideo
       ? response.current_content
       : markdownToHtml(response.current_content)
     
