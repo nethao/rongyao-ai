@@ -1,8 +1,8 @@
 """
 认证服务
 """
-from typing import Optional
-from sqlalchemy import select
+from typing import Optional, Tuple, List
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User
 from app.utils.auth import verify_password, get_password_hash
@@ -129,26 +129,89 @@ class AuthService:
         
         return True
     
+    async def list_users(
+        self,
+        page: int = 1,
+        size: int = 20
+    ) -> Tuple[List[User], int]:
+        """
+        分页获取用户列表（不含密码）
+
+        Returns:
+            (用户列表, 总数)
+        """
+        count_result = await self.db.execute(select(func.count(User.id)))
+        total = count_result.scalar_one()
+        offset = (page - 1) * size
+        result = await self.db.execute(
+            select(User).order_by(User.id.asc()).offset(offset).limit(size)
+        )
+        users = result.scalars().all()
+        return users, total
+
+    async def update_user(self, user_id: int, role: str) -> Optional[User]:
+        """
+        更新用户角色
+
+        Args:
+            user_id: 用户ID
+            role: 新角色（admin 或 editor）
+
+        Returns:
+            更新后的用户，不存在则返回 None
+        """
+        if role not in ("admin", "editor"):
+            raise ValueError("角色必须是 admin 或 editor")
+        user = await self.get_user_by_id(user_id)
+        if not user:
+            return None
+        user.role = role
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def delete_user(self, user_id: int, current_user_id: int) -> None:
+        """
+        删除用户。不能删除自己，不能删除最后一个管理员。
+
+        Raises:
+            ValueError: 不允许删除时
+        """
+        if user_id == current_user_id:
+            raise ValueError("不能删除当前登录用户")
+        user = await self.get_user_by_id(user_id)
+        if not user:
+            raise ValueError("用户不存在")
+        if user.role == "admin":
+            count_result = await self.db.execute(
+                select(func.count(User.id)).where(User.role == "admin")
+            )
+            admin_count = count_result.scalar_one()
+            if admin_count <= 1:
+                raise ValueError("不能删除唯一的管理员")
+        self.db.delete(user)
+        await self.db.commit()
+
     def check_permission(self, user: User, resource: str, action: str) -> bool:
         """
         检查用户权限
-        
+
         Args:
             user: 用户对象
             resource: 资源名称
             action: 操作类型
-        
+
         Returns:
             bool: 是否有权限
         """
         # 管理员拥有所有权限
         if user.role == "admin":
             return True
-        
+
         # 编辑人员权限规则
         if user.role == "editor":
             # 编辑人员可以访问审核和发布功能
             allowed_resources = ["submissions", "drafts", "publish"]
             return resource in allowed_resources
-        
+
         return False

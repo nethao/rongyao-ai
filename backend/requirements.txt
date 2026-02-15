@@ -23,6 +23,7 @@ aiofiles==23.2.1
 oss2==2.18.4
 beautifulsoup4==4.12.3
 lxml==5.1.0
+html2text==2024.2.26
 cryptography==42.0.2
 tenacity==8.2.3
 nest-asyncio==1.6.0

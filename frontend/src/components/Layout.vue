@@ -15,6 +15,10 @@
             <el-icon><Document /></el-icon>
             投稿列表
           </el-menu-item>
+          <el-menu-item v-if="isAdmin" index="/users">
+            <el-icon><UserFilled /></el-icon>
+            用户管理
+          </el-menu-item>
           <el-menu-item v-if="isAdmin" index="/config">
             <el-icon><Setting /></el-icon>
             系统配置
@@ -51,6 +55,7 @@ import {
   Document,
   Setting,
   User,
+  UserFilled,
   ArrowDown,
   SwitchButton
 } from '@element-plus/icons-vue'
@@ -67,6 +72,9 @@ const activeMenu = computed(() => {
   const path = route.path
   if (path.startsWith('/submissions') || path.startsWith('/audit')) {
     return '/submissions'
+  }
+  if (path.startsWith('/users')) {
+    return '/users'
   }
   if (path.startsWith('/config')) {
     return '/config'

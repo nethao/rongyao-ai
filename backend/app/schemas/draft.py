@@ -19,7 +19,7 @@ class DraftVersionSchema(BaseModel):
 
 class DraftBase(BaseModel):
     """草稿基础模型"""
-    current_content: str
+    current_content: Optional[str] = ""  # 兼容 NULL
 
 
 class DraftCreate(DraftBase):
@@ -39,12 +39,12 @@ class DraftSchema(DraftBase):
     id: int
     submission_id: int
     current_version: Optional[int] = 1  # DB 可能为 NULL
-    status: str
+    status: Optional[str] = "draft"  # DB 可能为 NULL
     published_at: Optional[datetime] = None
     published_to_site_id: Optional[int] = None
     wordpress_post_id: Optional[int] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None  # 兼容旧数据
+    updated_at: Optional[datetime] = None  # 兼容旧数据
 
 
 class DraftDetailSchema(DraftSchema):

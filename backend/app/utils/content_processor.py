@@ -90,7 +90,7 @@ class ContentProcessor:
         # 解析HTML
         soup = BeautifulSoup(html_str, 'html.parser')
         
-        # 处理所有img标签
+        # 处理所有 img 标签
         for img in soup.find_all('img'):
             src = img.get('src', '')
             data_id = img.get('data-id', '')
@@ -99,26 +99,54 @@ class ContentProcessor:
             if data_id and data_id.startswith('[[IMG_'):
                 placeholder = data_id
                 new_media_map[placeholder] = src
-                # 替换为占位符
                 img.replace_with(placeholder)
-            
             # 情况2: 没有data-id，说明是新上传的图片
             elif src:
-                # 生成新的占位符ID
                 while f'[[IMG_{next_img_id}]]' in new_media_map:
                     next_img_id += 1
                 placeholder = f'[[IMG_{next_img_id}]]'
                 new_media_map[placeholder] = src
-                # 替换为占位符
                 img.replace_with(placeholder)
                 next_img_id += 1
+
+        # 保留 video 标签：html2text 会丢失，先抽出并替换为占位符，转 markdown 后再插回（并统一加 controls）
+        video_blocks = []
+        for video in soup.find_all('video'):
+            video_html = ContentProcessor._ensure_video_controls(str(video))
+            video_blocks.append(video_html)
+            video.replace_with(f'[[VIDEO_BLOCK_{len(video_blocks)}]]')
         
-        # 转换HTML为Markdown
+        # 转换 HTML 为 Markdown
         html_cleaned = str(soup)
         md_text = ContentProcessor._html_to_markdown(html_cleaned)
+        for i, block in enumerate(video_blocks, 1):
+            md_text = md_text.replace(f'[[VIDEO_BLOCK_{i}]]', '\n\n' + block + '\n\n')
         
         return md_text, new_media_map
     
+    @staticmethod
+    def _ensure_video_controls(html_or_tag: str) -> str:
+        """
+        确保所有 <video> 标签包含 controls 属性（编辑器展示与发布到 WP 均需要）。
+        单标签输入时返回单个 <video>；完整 HTML 时返回 body 内片段（不包 <html><body>）。
+        """
+        if not html_or_tag or '<video' not in html_or_tag:
+            return html_or_tag
+        soup = BeautifulSoup(html_or_tag, 'html.parser')
+        for v in soup.find_all('video'):
+            if v.get('controls') is None:
+                v['controls'] = ''
+        videos = soup.find_all('video')
+        # 单标签输入（仅一个 video，且为 body 唯一子节点）时只返回该标签
+        if len(videos) == 1 and soup.find('body'):
+            body = soup.find('body')
+            if len(body.find_all(recursive=False)) == 1:
+                return str(videos[0])
+        # 完整 HTML：返回 body 内容，避免把 <html><body> 发给 WP
+        if soup.find('body'):
+            return soup.body.decode_contents()
+        return str(soup)
+
     @staticmethod
     def _html_to_markdown(html: str) -> str:
         """
@@ -189,9 +217,12 @@ class ContentProcessor:
             extensions=['extra', 'nl2br', 'sane_lists']
         )
         
-        # 替换占位符为标准img标签
+        # 替换占位符为标准 img 标签
         for placeholder, oss_url in (media_map or {}).items():
             img_tag = f'<img src="{oss_url}" style="max-width:100%; height:auto;" alt="图片" />'
             html = html.replace(placeholder, img_tag)
+
+        # 确保发布到 WP 的 video 标签带 controls
+        html = ContentProcessor._ensure_video_controls(html)
         
         return html

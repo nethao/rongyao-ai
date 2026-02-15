@@ -32,6 +32,12 @@ const router = createRouter({
           meta: { requiresAuth: true }
         },
         {
+          path: 'users',
+          name: 'users',
+          component: () => import('../views/UsersView.vue'),
+          meta: { requiresAuth: true, requiresAdmin: true }
+        },
+        {
           path: 'config',
           name: 'config',
           component: () => import('../views/ConfigView.vue'),
@@ -55,7 +61,7 @@ router.beforeEach((to, from, next) => {
 
   // 需要管理员权限的路由
   if (to.meta.requiresAdmin && !admin) {
-    next({ name: 'home' })
+    next({ path: '/submissions' })
     return
   }
 

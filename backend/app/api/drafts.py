@@ -109,50 +109,64 @@ async def update_draft(
     """
     更新草稿内容（使用占位符协议 - Dehydration）
     """
+    import logging
     from app.utils.content_processor import ContentProcessor
-    
+
+    logger = logging.getLogger(__name__)
+
     # 获取当前草稿
     result = await db.execute(
         select(Draft).where(Draft.id == draft_id)
     )
     draft = result.scalar_one_or_none()
-    
+
     if not draft:
         raise HTTPException(status_code=404, detail="草稿不存在")
-    
-    # === 占位符协议 Dehydration ===
-    # Dehydrate: HTML → Markdown + 占位符
-    new_md, new_media_map = ContentProcessor.dehydrate(
-        draft_update.content,
-        draft.media_map or {}
-    )
-    # 若保存内容里仍有占位符文本但无 <img>（如编辑器未显示图时），保留旧 media_map 中对应项，避免丢失
-    old_map = draft.media_map or {}
-    for placeholder, url in old_map.items():
-        if placeholder in new_md and placeholder not in new_media_map:
-            new_media_map[placeholder] = url
-    
-    # 更新草稿
-    draft.ai_content_md = new_md
-    draft.media_map = new_media_map
-    draft.current_content = draft_update.content  # 保留旧字段兼容
-    draft.current_version += 1
-    
-    # 创建版本记录
-    version = DraftVersion(
-        draft_id=draft.id,
-        version_number=draft.current_version,
-        content=draft_update.content,  # 旧字段
-        content_md=new_md,  # 新字段
-        media_map=new_media_map,  # 新字段
-        created_by=current_user.id
-    )
-    
-    db.add(version)
-    await db.commit()
-    await db.refresh(draft)
-    
-    return draft
+
+    try:
+        # === 占位符协议 Dehydration ===
+        content_str = draft_update.content if draft_update.content is not None else ""
+        new_md, new_media_map = ContentProcessor.dehydrate(
+            content_str,
+            draft.media_map or {}
+        )
+        # 若保存内容里仍有占位符文本但无 <img>（如编辑器未显示图时），保留旧 media_map 中对应项，避免丢失
+        old_map = draft.media_map or {}
+        for placeholder, url in old_map.items():
+            if placeholder in new_md and placeholder not in new_media_map:
+                new_media_map[placeholder] = url
+
+        # 更新草稿（兼容 current_version 为 NULL 的旧数据）
+        draft.ai_content_md = new_md
+        draft.media_map = new_media_map
+        draft.current_content = content_str
+        draft.current_version = (draft.current_version or 0) + 1
+        if draft.status is None:
+            draft.status = "draft"
+
+        # 创建版本记录
+        version = DraftVersion(
+            draft_id=draft.id,
+            version_number=draft.current_version,
+            content=content_str,
+            content_md=new_md,
+            media_map=new_media_map,
+            created_by=current_user.id
+        )
+
+        db.add(version)
+        await db.commit()
+        await db.refresh(draft)
+
+        return draft
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("update_draft failed: %s", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"保存失败: {type(e).__name__}: {str(e)}"
+        )
 
 
 @router.get("/{draft_id}/versions", response_model=DraftVersionListResponse)

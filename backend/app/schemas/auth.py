@@ -3,7 +3,7 @@
 """
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 
 class UserBase(BaseModel):
@@ -15,6 +15,16 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """用户创建模型"""
     password: str
+
+
+class UserUpdate(BaseModel):
+    """用户更新模型（仅角色）"""
+    role: str  # 'admin' | 'editor'
+
+
+class AdminResetPasswordRequest(BaseModel):
+    """管理员重置用户密码请求"""
+    new_password: str
 
 
 class User(UserBase):
@@ -48,3 +58,11 @@ class PasswordChangeRequest(BaseModel):
 class MessageResponse(BaseModel):
     """通用消息响应"""
     message: str
+
+
+class UserListResponse(BaseModel):
+    """用户列表响应"""
+    items: List[User]
+    total: int
+    page: int
+    size: int

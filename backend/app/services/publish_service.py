@@ -152,17 +152,19 @@ class PublishService:
         title = submission.email_subject or "无标题"
         
         # === 占位符协议渲染 ===
+        from app.utils.content_processor import ContentProcessor
         # 如果有新字段，使用占位符协议渲染
         if draft.ai_content_md and draft.media_map:
-            from app.utils.content_processor import ContentProcessor
             content_html = ContentProcessor.render_for_wordpress(
                 draft.ai_content_md,
                 draft.media_map
             )
         else:
             # 兼容旧数据：替换图片URL并转换Markdown
-            content_with_images = self.replace_image_urls(draft.current_content, submission)
+            content_with_images = self.replace_image_urls(draft.current_content or "", submission)
             content_html = self.markdown_to_html(content_with_images)
+        # 统一为 <video> 添加 controls，避免发布到 WP 后缺少播放控制条
+        content_html = ContentProcessor._ensure_video_controls(content_html)
         
         success, post_id, error_msg = await wp_service.create_post(
             title=title,

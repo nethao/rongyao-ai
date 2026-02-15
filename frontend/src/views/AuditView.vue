@@ -495,7 +495,9 @@ const handleSave = async (isAutoSave = false) => {
       ElMessage.success('保存成功')
     }
   } catch (error) {
-    ElMessage.error('保存失败: ' + (error.message || '未知错误'))
+    const detail = error.response?.data?.detail
+    const msg = typeof detail === 'string' ? detail : (error.message || '未知错误')
+    ElMessage.error('保存失败: ' + msg)
   } finally {
     saving.value = false
   }
