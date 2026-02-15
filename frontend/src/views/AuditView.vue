@@ -718,6 +718,12 @@ const handleRestoreAI = async () => {
     hasUnsavedChanges.value = false
     tiptapRef.value?.setHTML?.(editableHtml.value)
     ElMessage.success('已恢复到AI原始版本')
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('恢复失败: ' + (error.message || '未知错误'))
+    }
+  }
+}
 
 // 获取来源图标
 const getSourceIcon = (source) => {
