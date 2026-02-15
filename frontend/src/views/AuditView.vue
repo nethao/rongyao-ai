@@ -763,11 +763,6 @@ const getSourceTagType = (source) => {
   }
   return types[source] || 'info'
 }
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('恢复失败: ' + (error.message || '未知错误'))
-    }
-  }
 }
 
 // 发布相关
