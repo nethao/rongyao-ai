@@ -60,9 +60,9 @@ def transform_content_task(self, submission_id: int):
                     logger.error(error_msg)
                     raise ValueError(error_msg)
                 
-                # 视频类型跳过AI改写，直接创建草稿
-                if submission.content_source == 'video':
-                    logger.info(f"视频类型跳过AI改写，直接创建草稿")
+                # 视频和压缩包类型跳过AI改写，直接创建草稿
+                if submission.content_source in ['video', 'archive']:
+                    logger.info(f"{submission.content_source}类型跳过AI改写，直接创建草稿")
                     
                     draft = await db.execute(
                         text('''
@@ -79,14 +79,14 @@ def transform_content_task(self, submission_id: int):
                     await db.commit()
                     
                     await submission_service.update_status(submission_id, 'completed')
-                    logger.info(f"视频草稿创建成功: draft_id={draft_id}")
+                    logger.info(f"{submission.content_source}草稿创建成功: draft_id={draft_id}")
                     
                     return {
                         'status': 'success',
                         'submission_id': submission_id,
                         'draft_id': draft_id,
                         'skipped': True,
-                        'reason': 'video'
+                        'reason': submission.content_source
                     }
                 
                 # 更新状态为processing

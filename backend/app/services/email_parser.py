@@ -28,6 +28,7 @@ class ContentType(str, Enum):
     MEIPIAN = "meipian"  # 美篇链接
     WORD = "word"  # Word文档
     VIDEO = "video"  # 视频
+    ARCHIVE = "archive"  # 压缩包
 
 
 class EmailParser:
@@ -109,6 +110,10 @@ class EmailParser:
         if attachments:
             for filename, _ in attachments:
                 filename_lower = filename.lower()
+                
+                # 压缩包文件
+                if any(filename_lower.endswith(ext) for ext in ['.zip', '.rar', '.7z']):
+                    return ContentType.ARCHIVE
                 
                 # 视频文件
                 if any(filename_lower.endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv']):

@@ -179,6 +179,28 @@ async def process_email(email_data, doc_processor, oss_service):
                         # 提取文本时跳过标题行
                         content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
             
+            elif content_type == ContentType.ARCHIVE:
+                # 处理压缩包 - 直接上传到OSS
+                archive_urls = []
+                for filename, file_data in email_data.attachments:
+                    if any(filename.lower().endswith(ext) for ext in ['.zip', '.rar', '.7z']):
+                        logger.info(f"发现压缩包: {filename}, 大小: {len(file_data)/1024/1024:.2f}MB")
+                        # 直接上传到OSS
+                        oss_url, oss_key = oss_service.upload_file(
+                            file_data=file_data,
+                            filename=filename,
+                            folder='archives'
+                        )
+                        archive_urls.append((filename, oss_url))
+                        logger.info(f"压缩包已上传到OSS: {oss_url}")
+                
+                # 生成下载链接，并保留邮件正文
+                archive_html = "\n\n".join([f'<p><a href="{url}" download="{name}">📦 下载: {name}</a></p>' for name, url in archive_urls])
+                if content:
+                    content = f"{content}\n\n{archive_html}"
+                else:
+                    content = archive_html
+            
             elif content_type == ContentType.VIDEO:
                 # 处理视频附件 - 直接上传到OSS
                 video_urls = []
@@ -207,6 +229,8 @@ async def process_email(email_data, doc_processor, oss_service):
                 content_source = 'weixin'
             elif content_type == ContentType.MEIPIAN:
                 content_source = 'meipian'
+            elif content_type == ContentType.ARCHIVE:
+                content_source = 'archive'
             elif content_type == ContentType.VIDEO:
                 content_source = 'video'
             elif doc_path:
