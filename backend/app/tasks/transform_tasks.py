@@ -66,8 +66,8 @@ def transform_content_task(self, submission_id: int):
                     
                     draft = await db.execute(
                         text('''
-                            INSERT INTO drafts (submission_id, ai_content_md, status, created_by)
-                            VALUES (:submission_id, :content, 'draft', 1)
+                            INSERT INTO drafts (submission_id, current_content, ai_content_md, status)
+                            VALUES (:submission_id, :content, :content, 'draft')
                             RETURNING id
                         '''),
                         {
