@@ -23,6 +23,26 @@ status_message: "Too many requests. Your requests are being throttled due to sys
 
 ---
 
+### BUG-003: 编辑器中图片占位符不显示 + 排版错乱
+**状态**: 已修复  
+**发现时间**: 2026-02-15～16  
+**描述**: 草稿页编辑区显示 `[[IMG_1]]` 而非图片；修复图片后文字/列表排版错乱。
+
+**根因**:
+1. 前端做占位符替换时二次替换破坏了 `data-id` 内的占位符；且部分草稿 `media_map` 在保存时被清空（编辑器无 `<img>` 时 dehydrate 返回空 map 并覆盖）。
+2. 后端 `_sanitize_html` 对 `<li>` 内 `<p>` 做 unwrap 并删“空”列表项，导致列表与段落结构被破坏。
+
+**已修复**:
+- 后端 GET 草稿时统一做 Hydration（`ContentProcessor.hydrate`），返回已含 `<img>` 的 HTML；前端直接使用。
+- PUT 保存时保留旧 `media_map` 中仍在内容里出现的占位符；GET 时若 `media_map` 为空则从 `submission.images` 按序恢复。
+- `hydrate()` 兼容输入已是 HTML 的情况（只做占位符替换）。
+- `_sanitize_html()` 仅移除完全空段落，不再 unwrap 列表项，保留排版。
+
+**详细记录**: 见 `BUG_IMAGE_PLACEHOLDER.md`  
+**相关文件**: `backend/app/api/drafts.py`、`backend/app/utils/content_processor.py`、`frontend/src/views/AuditView.vue`
+
+---
+
 ### BUG-001: 公众号排版显示问题
 **状态**: 已修复  
 **发现时间**: 2026-02-15 01:04  

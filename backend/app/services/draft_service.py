@@ -159,6 +159,7 @@ class DraftService:
                 f"draft_id={existing_draft.id}"
             )
             # 如果已存在草稿，更新内容而不是创建新草稿
+            logger.info(f"更新现有草稿: draft_id={existing_draft.id}, media_map={media_map}")
             return await self.update_draft(
                 existing_draft.id,
                 transformed_content=transformed_content,
@@ -263,11 +264,13 @@ class DraftService:
             raise ValueError(error_msg)
         
         # 使用新方式或旧方式
+        logger.info(f"update_draft收到: ai_content_md长度={len(ai_content_md) if ai_content_md else 0}, media_map={media_map}")
         if ai_content_md and media_map is not None:
             # 新方式：直接存储Markdown，不做格式化
             content_md = ai_content_md
             final_media_map = media_map
             formatted_content = ai_content_md  # 直接存储Markdown
+            logger.info(f"使用新方式，final_media_map={final_media_map}")
         else:
             # 旧方式：使用content或transformed_content
             actual_content = content or transformed_content

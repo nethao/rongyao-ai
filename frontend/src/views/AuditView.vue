@@ -374,9 +374,17 @@ const loadDraft = async () => {
     articleTitle.value = response.email_subject || ''
     contentSource.value = response.content_source || ''
     originalContent.value = response.original_content
-    editableContent.value = response.current_content
     currentVersion.value = response.current_version
     hasUnsavedChanges.value = false
+
+    // 编辑器内容：后端已做 Hydration（占位符→img），直接使用；无 media_map 时按旧数据转 HTML
+    const hasPlaceholders = response.media_map && Object.keys(response.media_map).length > 0
+    const processedContent = hasPlaceholders
+      ? response.current_content
+      : markdownToHtml(response.current_content)
+    
+    editableContent.value = response.current_content
+    editableHtml.value = processedContent
 
     // 优先使用原始HTML，否则转换Markdown
     if (response.original_html) {
@@ -384,7 +392,6 @@ const loadDraft = async () => {
     } else {
       originalHtml.value = markdownToHtml(originalContent.value)
     }
-    editableHtml.value = markdownToHtml(editableContent.value)
 
     // 写入 iframe 以还原公众号排版
     if (response.original_html) {
@@ -628,13 +635,16 @@ const handleAiTransform = async () => {
           console.log('✅ 检测到内容变化！')
           transforming.value = false
           transformProgress.value = 100
+          
+          const hasPlaceholders = res.media_map && Object.keys(res.media_map).length > 0
+          const processedContent = hasPlaceholders ? res.current_content : markdownToHtml(res.current_content)
           editableContent.value = res.current_content
-          editableHtml.value = markdownToHtml(res.current_content)
+          editableHtml.value = processedContent
           currentVersion.value = res.current_version
           hasUnsavedChanges.value = false
           
           console.log('步骤4: 更新编辑器...')
-          tiptapRef.value?.setHTML?.(editableHtml.value)
+          tiptapRef.value?.setHTML?.(processedContent)
           
           console.log('步骤5: 加载版本历史...')
           await loadVersions()

@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.user import User
 from app.models.draft import Draft, DraftVersion
-from app.models.submission import Submission
+from app.models.submission import Submission  # 用于 selectinload(Submission.images)
 from app.schemas.draft import (
     DraftSchema,
     DraftDetailSchema,
@@ -36,9 +36,9 @@ async def get_draft(
     """
     from app.utils.content_processor import ContentProcessor
     
-    # 查询草稿及关联的投稿
+    # 查询草稿及关联的投稿（含投稿图片，用于 media_map 丢失时按序恢复）
     query = select(Draft).where(Draft.id == draft_id).options(
-        selectinload(Draft.submission)
+        selectinload(Draft.submission).selectinload(Submission.images)
     )
     result = await db.execute(query)
     draft = result.scalar_one_or_none()
@@ -46,20 +46,31 @@ async def get_draft(
     if not draft:
         raise HTTPException(status_code=404, detail="草稿不存在")
     
-    # === 占位符协议 Hydration ===
-    # 如果有新字段，使用占位符协议
-    if draft.ai_content_md and draft.media_map:
-        # 直接返回AI原始Markdown内容（不做hydrate转换）
-        current_content = draft.ai_content_md
+    # 占位符映射：优先用草稿自己的；若为空但内容里有 [[IMG_N]] 且投稿有图片，则按投稿图片顺序恢复
+    media_map = draft.media_map if draft.media_map else {}
+    content_for_placeholders = (draft.ai_content_md or "") or (draft.current_content or "")
+    if not media_map and content_for_placeholders and "[[IMG_" in content_for_placeholders and draft.submission.images:
+        ordered_images = sorted(draft.submission.images, key=lambda x: x.id)
+        for i, img in enumerate(ordered_images, start=1):
+            placeholder = f"[[IMG_{i}]]"
+            if placeholder in content_for_placeholders:
+                media_map[placeholder] = img.oss_url
+    
+    # === Hydration：把 [[IMG_N]] 转为 <img>，前端直接展示 ===
+    content_to_hydrate = draft.ai_content_md or draft.current_content or ""
+    if content_to_hydrate and media_map:
+        current_content = ContentProcessor.hydrate(content_to_hydrate, media_map)
+    elif draft.ai_content_md:
+        current_content = ContentProcessor.hydrate(draft.ai_content_md, {})
     else:
-        # 兼容旧数据
         current_content = draft.current_content
     
     # 构建响应
     draft_dict = {
         "id": draft.id,
         "submission_id": draft.submission_id,
-        "current_content": current_content,  # 返回hydrated HTML
+        "current_content": current_content,  # 已替换占位符的 HTML，或旧数据原文
+        "media_map": media_map,  # 占位符映射（含恢复出的，保存时需用）
         "current_version": draft.current_version,
         "status": draft.status,
         "published_at": draft.published_at,
@@ -103,6 +114,11 @@ async def update_draft(
         draft_update.content,
         draft.media_map or {}
     )
+    # 若保存内容里仍有占位符文本但无 <img>（如编辑器未显示图时），保留旧 media_map 中对应项，避免丢失
+    old_map = draft.media_map or {}
+    for placeholder, url in old_map.items():
+        if placeholder in new_md and placeholder not in new_media_map:
+            new_media_map[placeholder] = url
     
     # 更新草稿
     draft.ai_content_md = new_md

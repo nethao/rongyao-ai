@@ -16,34 +16,24 @@ class ContentProcessor:
     @staticmethod
     def _sanitize_html(raw_html: str) -> str:
         """
-        Post-process HTML for Tiptap: remove empty paragraphs, tighten lists.
-        Reduces excessive <p><br></p> and unwraps <p> inside <li> to avoid huge gaps.
+        Post-process HTML：仅移除完全空的段落（<p></p>、<p><br></p>），
+        不再 unwrap <li> 内的 <p>，避免破坏列表与段落排版。
         """
         soup = BeautifulSoup(raw_html, 'html.parser')
-
-        # 1. Remove empty paragraphs (e.g. <p><br></p> or <p></p>)
         for p in list(soup.find_all('p')):
             if not p.get_text(strip=True) and not p.find('img'):
                 if len(p.contents) == 0 or (len(p.contents) == 1 and p.find('br')):
                     p.decompose()
-
-        # 2. Fix list items: unwrap <p> inside <li>, remove empty <li>
-        for li in list(soup.find_all('li')):
-            if not li.get_text(strip=True) and not li.find('img'):
-                li.decompose()
-                continue
-            for p in li.find_all('p'):
-                p.unwrap()
-
         return str(soup)
 
     @staticmethod
     def hydrate(md_text: str, media_map: Dict[str, str]) -> str:
         """
         Hydration: Markdown + 占位符 → HTML (用于Tiptap加载)
+        若输入已是 HTML（含 <p>、<h2> 等），则只做占位符替换，不经过 markdown 解析。
         
         Args:
-            md_text: 带有[[IMG_x]]占位符的Markdown文本
+            md_text: 带有[[IMG_x]]占位符的Markdown或已有HTML
             media_map: 占位符到OSS URL的映射 {"[[IMG_1]]": "https://oss..."}
             
         Returns:
@@ -51,21 +41,36 @@ class ContentProcessor:
         """
         if not md_text:
             return ""
+        media_map = media_map or {}
         
-        # 1. 清理Markdown中的多余空行（3个以上连续换行 -> 2个）
+        # 已是 HTML：只替换占位符（避免对 HTML 再跑 markdown 解析）
+        if md_text.strip().startswith("<") or "<p>" in md_text:
+            html = md_text
+            for placeholder, oss_url in media_map.items():
+                img_tag = f'<img src="{oss_url}" data-id="{placeholder}" style="max-width:100%; height:auto;" alt="图片" />'
+                # 只替换 <p>[[IMG_N]]</p>，不替换属性里的占位符
+                html = re.sub(
+                    re.escape(placeholder).join([r"<p>\s*", r"\s*</p>"]),
+                    img_tag,
+                    html,
+                    flags=re.DOTALL,
+                )
+            return html
+        
+        # 1. 清理Markdown中的多余空行
         md_text = re.sub(r'\n{3,}', '\n\n', md_text)
         
         # 2. 将Markdown转换为HTML
         html = markdown.markdown(
             md_text,
-            extensions=['extra', 'sane_lists']  # 移除nl2br，避免过多换行
+            extensions=['extra', 'sane_lists']
         )
         
-        # 3. Sanitize: 移除空段落、收紧列表，避免 Tiptap 中大片空白
+        # 3. Sanitize
         html = ContentProcessor._sanitize_html(html)
         
         # 4. 替换占位符为img标签
-        for placeholder, oss_url in (media_map or {}).items():
+        for placeholder, oss_url in media_map.items():
             img_tag = f'<img src="{oss_url}" data-id="{placeholder}" style="max-width:100%; height:auto;" alt="图片" />'
             html = html.replace(placeholder, img_tag)
         
