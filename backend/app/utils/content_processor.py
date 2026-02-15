@@ -30,10 +30,9 @@ class ContentProcessor:
     def hydrate(md_text: str, media_map: Dict[str, str]) -> str:
         """
         Hydration: Markdown + 占位符 → HTML (用于Tiptap加载)
-        若输入已是 HTML（含 <p>、<h2> 等），则只做占位符替换，不经过 markdown 解析。
         
         Args:
-            md_text: 带有[[IMG_x]]占位符的Markdown或已有HTML
+            md_text: 带有[[IMG_x]]占位符的Markdown文本
             media_map: 占位符到OSS URL的映射 {"[[IMG_1]]": "https://oss..."}
             
         Returns:
@@ -43,33 +42,26 @@ class ContentProcessor:
             return ""
         media_map = media_map or {}
         
-        # 已是 HTML：只替换占位符（避免对 HTML 再跑 markdown 解析）
-        if md_text.strip().startswith("<") or "<p>" in md_text:
-            html = md_text
-            for placeholder, oss_url in media_map.items():
-                img_tag = f'<img src="{oss_url}" data-id="{placeholder}" style="max-width:100%; height:auto;" alt="图片" />'
-                # 只替换 <p>[[IMG_N]]</p>，不替换属性里的占位符
-                html = re.sub(
-                    re.escape(placeholder).join([r"<p>\s*", r"\s*</p>"]),
-                    img_tag,
-                    html,
-                    flags=re.DOTALL,
-                )
-            return html
+        # 0. 兼容旧格式：![图片N](URL) -> [[IMG_N]]
+        md_text = re.sub(r'!\[图片(\d+)\]\(([^)]+)\)', lambda m: f'[[IMG_{m.group(1)}]]', md_text)
         
-        # 1. 清理Markdown中的多余空行
+        # 1. 修复AI返回的格式问题：标题后没换行
+        # ### 标题 内容 -> ### 标题\n\n内容
+        md_text = re.sub(r'(#{2,4})\s+([^\n]+?)\s+([^#\n])', r'\1 \2\n\n\3', md_text)
+        
+        # 2. 清理Markdown中的多余空行
         md_text = re.sub(r'\n{3,}', '\n\n', md_text)
         
-        # 2. 将Markdown转换为HTML
+        # 3. 将Markdown转换为HTML
         html = markdown.markdown(
             md_text,
             extensions=['extra', 'sane_lists']
         )
         
-        # 3. Sanitize
+        # 4. Sanitize
         html = ContentProcessor._sanitize_html(html)
         
-        # 4. 替换占位符为img标签
+        # 5. 替换占位符为img标签
         for placeholder, oss_url in media_map.items():
             img_tag = f'<img src="{oss_url}" data-id="{placeholder}" style="max-width:100%; height:auto;" alt="图片" />'
             html = html.replace(placeholder, img_tag)

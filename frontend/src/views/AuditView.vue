@@ -428,12 +428,14 @@ const createSnapshot = (label) => {
 // 内容变化处理
 const handleContentChange = () => {
   hasUnsavedChanges.value = true
-  startAutoSave()
+  // 暂时禁用自动保存，避免频繁创建版本
+  // startAutoSave()
 }
 
 const handleTitleChange = () => {
   hasUnsavedChanges.value = true
-  startAutoSave()
+  // 暂时禁用自动保存
+  // startAutoSave()
 }
 
 // 自动保存
@@ -460,11 +462,9 @@ const handleSave = async (isAutoSave = false) => {
 
   saving.value = true
   try {
-    const markdownContent = htmlToMarkdown(html)
+    // 直接传HTML给后端，让后端的dehydrate处理
+    const response = await updateDraft(draftId.value, html)
 
-    const response = await updateDraft(draftId.value, markdownContent)
-
-    editableContent.value = markdownContent
     currentVersion.value = response.current_version
     hasUnsavedChanges.value = false
 
