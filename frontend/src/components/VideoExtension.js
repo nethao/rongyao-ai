@@ -1,4 +1,6 @@
 import { Node, mergeAttributes } from '@tiptap/core'
+import { VueNodeViewRenderer } from '@tiptap/vue-3'
+import VideoComponent from './VideoComponent.vue'
 
 export const Video = Node.create({
   name: 'video',
@@ -46,6 +48,10 @@ export const Video = Node.create({
     ]
   },
 
+  addNodeView() {
+    return VueNodeViewRenderer(VideoComponent)
+  },
+
   addCommands() {
     return {
       setVideo:
@@ -59,4 +65,5 @@ export const Video = Node.create({
     }
   },
 })
+
 
