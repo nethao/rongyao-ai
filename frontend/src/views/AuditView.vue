@@ -73,12 +73,22 @@
               <el-button
                 type="primary"
                 :loading="transforming"
-                :disabled="!submissionId"
+                :disabled="!submissionId || contentSource === 'video'"
                 @click="handleAiTransform"
               >
                 <el-icon><Edit /></el-icon>
                 AI改写
               </el-button>
+              <el-tooltip 
+                v-if="contentSource === 'video'" 
+                content="视频内容需要手工编辑，不支持AI改写" 
+                placement="bottom"
+              >
+                <el-tag type="info" style="margin-left: 8px;">
+                  <el-icon><InfoFilled /></el-icon>
+                  视频内容
+                </el-tag>
+              </el-tooltip>
               <el-button
                 @click="showSourceCode = !showSourceCode"
                 :type="showSourceCode ? 'warning' : 'default'"
@@ -276,7 +286,8 @@ import {
   Check,
   Upload,
   Edit,
-  Document
+  Document,
+  InfoFilled
 } from '@element-plus/icons-vue'
 import { getDraft, updateDraft, getDraftVersions, restoreVersion, restoreAIVersion } from '../api/draft'
 import { triggerTransform } from '../api/submission'
