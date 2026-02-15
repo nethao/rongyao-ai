@@ -37,10 +37,7 @@ async def list_submissions(
     from app.models.draft import Draft
     
     # 构建查询
-    query = select(Submission).options(
-        selectinload(Submission.images),
-        selectinload(Submission.drafts)
-    )
+    query = select(Submission)
     
     # 状态筛选
     if status:
@@ -81,6 +78,10 @@ async def list_submissions(
     # 分页查询
     query = query.order_by(Submission.created_at.desc())
     query = query.offset((page - 1) * size).limit(size)
+    query = query.options(
+        selectinload(Submission.images),
+        selectinload(Submission.drafts)
+    )
     
     result = await db.execute(query)
     submissions = result.scalars().all()
