@@ -148,6 +148,9 @@ class PublishService:
         # 发布到WordPress
         wp_service = WordPressService(site, api_password)
         
+        # 获取标题（从投稿的邮件主题）
+        title = submission.email_subject or "无标题"
+        
         # === 占位符协议渲染 ===
         # 如果有新字段，使用占位符协议渲染
         if draft.ai_content_md and draft.media_map:
