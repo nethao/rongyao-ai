@@ -153,6 +153,53 @@ class DocumentProcessor:
             logger.error(f"提取文本失败: {str(e)}")
             raise
     
+    def extract_title_from_docx(self, docx_path: str) -> str:
+        """
+        从.docx文件提取标题
+        
+        提取前两行非空内容作为标题：
+        第1行：主标题
+        第2行（如果以--开头）：副标题
+        
+        Args:
+            docx_path: .docx文件路径
+        
+        Returns:
+            str: 提取的标题
+        """
+        if not os.path.exists(docx_path):
+            raise FileNotFoundError(f"文件不存在: {docx_path}")
+        
+        try:
+            doc = Document(docx_path)
+            
+            lines = []
+            for paragraph in doc.paragraphs:
+                text = paragraph.text.strip()
+                if text and not text.startswith('[[IMG_'):
+                    lines.append(text)
+                    if len(lines) >= 2:
+                        break
+            
+            if not lines:
+                return "无标题"
+            
+            # 如果只有一行，直接返回
+            if len(lines) == 1:
+                return lines[0]
+            
+            # 如果第二行以--开头，组合为完整标题
+            if lines[1].startswith('--'):
+                subtitle = lines[1].lstrip('-').strip()
+                return f"{lines[0]}——{subtitle}"
+            else:
+                # 否则只返回第一行
+                return lines[0]
+        
+        except Exception as e:
+            logger.error(f"提取标题失败: {str(e)}")
+            return "无标题"
+    
     def extract_images_from_docx(
         self,
         docx_path: str,

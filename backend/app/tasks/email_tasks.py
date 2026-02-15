@@ -163,11 +163,21 @@ async def process_email(email_data, doc_processor, oss_service):
                         docx_path = doc_processor.convert_doc_to_docx(doc_path)
                         # 提取文本
                         content = doc_processor.extract_text_from_docx(docx_path)
+                        # 提取标题（覆盖邮件主题中的title）
+                        doc_title = doc_processor.extract_title_from_docx(docx_path)
+                        if doc_title and doc_title != "无标题":
+                            title = doc_title
+                            logger.info(f"从Word文档提取标题: {title}")
                     
                     elif filename.lower().endswith('.docx'):
                         docx_path = temp_file.name
                         # 提取文本
                         content = doc_processor.extract_text_from_docx(docx_path)
+                        # 提取标题
+                        doc_title = doc_processor.extract_title_from_docx(docx_path)
+                        if doc_title and doc_title != "无标题":
+                            title = doc_title
+                            logger.info(f"从Word文档提取标题: {title}")
             
             elif content_type == ContentType.VIDEO:
                 # 处理视频附件
