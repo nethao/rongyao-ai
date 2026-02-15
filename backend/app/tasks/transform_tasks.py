@@ -60,6 +60,35 @@ def transform_content_task(self, submission_id: int):
                     logger.error(error_msg)
                     raise ValueError(error_msg)
                 
+                # 视频类型跳过AI改写，直接创建草稿
+                if submission.content_source == 'video':
+                    logger.info(f"视频类型跳过AI改写，直接创建草稿")
+                    
+                    draft = await db.execute(
+                        text('''
+                            INSERT INTO drafts (submission_id, ai_content_md, status, created_by)
+                            VALUES (:submission_id, :content, 'draft', 1)
+                            RETURNING id
+                        '''),
+                        {
+                            'submission_id': submission_id,
+                            'content': submission.original_content
+                        }
+                    )
+                    draft_id = draft.scalar_one()
+                    await db.commit()
+                    
+                    await submission_service.update_status(submission_id, 'completed')
+                    logger.info(f"视频草稿创建成功: draft_id={draft_id}")
+                    
+                    return {
+                        'status': 'success',
+                        'submission_id': submission_id,
+                        'draft_id': draft_id,
+                        'skipped': True,
+                        'reason': 'video'
+                    }
+                
                 # 更新状态为processing
                 await submission_service.update_status(submission_id, 'processing')
                 

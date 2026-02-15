@@ -92,6 +92,7 @@
       <el-table
         v-loading="loading"
         :data="submissions"
+        row-key="id"
         style="width: 100%"
         @row-click="handleRowClick"
       >
@@ -136,25 +137,29 @@
         </el-table-column>
         <el-table-column label="附件" width="100" align="center">
           <template #default="{ row }">
-            <div style="display: flex; gap: 8px; justify-content: center; align-items: center;">
+            <div class="attachment-cell">
               <!-- 图片 -->
-              <el-badge 
-                v-if="getImageCount(row) > 0" 
-                :value="getImageCount(row)" 
-                :max="99"
-                type="primary"
-              >
-                <el-icon :size="20" color="#409EFF"><Picture /></el-icon>
-              </el-badge>
+              <span v-if="getImageCount(row) > 0" class="attachment-badge-wrap">
+                <el-badge 
+                  :value="getImageCount(row)" 
+                  :max="99"
+                  type="primary"
+                  class="attachment-badge"
+                >
+                  <el-icon :size="20" color="#409EFF"><Picture /></el-icon>
+                </el-badge>
+              </span>
               <!-- 视频 -->
-              <el-badge 
-                v-if="getVideoCount(row) > 0" 
-                :value="getVideoCount(row)" 
-                :max="99"
-                type="warning"
-              >
-                <el-icon :size="20" color="#E6A23C"><VideoCamera /></el-icon>
-              </el-badge>
+              <span v-if="getVideoCount(row) > 0" class="attachment-badge-wrap">
+                <el-badge 
+                  :value="getVideoCount(row)" 
+                  :max="99"
+                  type="warning"
+                  class="attachment-badge"
+                >
+                  <el-icon :size="20" color="#E6A23C"><VideoCamera /></el-icon>
+                </el-badge>
+              </span>
               <!-- Word文档 -->
               <el-icon 
                 v-if="row.docx_file_path || row.doc_file_path" 
@@ -340,39 +345,46 @@ const getMediaName = (mediaType) => {
   return mediaMap[mediaType] || mediaType
 }
 
-// 获取图片数量（排除视频）
+// 视频扩展名正则（与下面 getVideoList 一致）
+const VIDEO_EXT_RE = /\.(mp4|avi|mov|wmv|flv|mkv)$/i
+
+// 获取图片数量（排除视频）：仅统计 submission_images 中非视频项
 const getImageCount = (row) => {
-  if (!row.images || row.images.length === 0) return 0
+  if (!row || !Array.isArray(row.images) || row.images.length === 0) return 0
   return row.images.filter(img => {
-    const filename = img.original_filename || ''
-    return !filename.match(/\.(mp4|avi|mov|wmv|flv|mkv)$/i)
+    if (!img || typeof img !== 'object') return false
+    const filename = (img.original_filename ?? img.originalFilename ?? '').toString()
+    return !VIDEO_EXT_RE.test(filename)
   }).length
 }
 
 // 获取视频数量
 const getVideoCount = (row) => {
-  if (!row.images || row.images.length === 0) return 0
+  if (!row || !Array.isArray(row.images) || row.images.length === 0) return 0
   return row.images.filter(img => {
-    const filename = img.original_filename || ''
-    return filename.match(/\.(mp4|avi|mov|wmv|flv|mkv)$/i)
+    if (!img || typeof img !== 'object') return false
+    const filename = (img.original_filename ?? img.originalFilename ?? '').toString()
+    return VIDEO_EXT_RE.test(filename)
   }).length
 }
 
 // 获取图片列表（排除视频）
 const getImageList = (submission) => {
-  if (!submission.images || submission.images.length === 0) return []
+  if (!submission || !Array.isArray(submission.images) || submission.images.length === 0) return []
   return submission.images.filter(img => {
-    const filename = img.original_filename || ''
-    return !filename.match(/\.(mp4|avi|mov|wmv|flv|mkv)$/i)
+    if (!img || typeof img !== 'object') return false
+    const filename = (img.original_filename ?? img.originalFilename ?? '').toString()
+    return !VIDEO_EXT_RE.test(filename)
   })
 }
 
 // 获取视频列表
 const getVideoList = (submission) => {
-  if (!submission.images || submission.images.length === 0) return []
+  if (!submission || !Array.isArray(submission.images) || submission.images.length === 0) return []
   return submission.images.filter(img => {
-    const filename = img.original_filename || ''
-    return filename.match(/\.(mp4|avi|mov|wmv|flv|mkv)$/i)
+    if (!img || typeof img !== 'object') return false
+    const filename = (img.original_filename ?? img.originalFilename ?? '').toString()
+    return VIDEO_EXT_RE.test(filename)
   })
 }
 
@@ -650,5 +662,45 @@ onMounted(() => {
 
 :deep(.el-table__row:hover) {
   background-color: #f5f7fa;
+}
+
+/* 附件列：徽章数字不错位、不裁切 */
+.attachment-cell {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+}
+
+.attachment-badge-wrap {
+  display: inline-flex;
+  position: relative;
+  line-height: 0;
+}
+
+.attachment-badge-wrap :deep(.el-badge) {
+  display: inline-flex;
+}
+
+.attachment-badge-wrap :deep(.el-badge__content) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin: 0;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 6px;
+  text-align: center;
+  transform: translate(50%, -50%);
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+.attachment-badge-wrap :deep(.el-badge__content.is-fixed) {
+  position: absolute;
+  top: 0;
+  right: 0;
+  transform: translate(50%, -50%);
 }
 </style>

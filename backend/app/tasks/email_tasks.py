@@ -180,19 +180,30 @@ async def process_email(email_data, doc_processor, oss_service):
                         content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
             
             elif content_type == ContentType.VIDEO:
-                # 处理视频附件
+                # 处理视频附件 - 直接上传到OSS
+                video_urls = []
                 for filename, file_data in email_data.attachments:
                     if any(filename.lower().endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv']):
                         logger.info(f"发现视频文件: {filename}, 大小: {len(file_data)/1024/1024:.2f}MB")
-                        # 将视频添加到待上传列表
-                        images_to_upload.append((filename, file_data))
-                        content = f"视频文件: {filename}"
+                        # 直接上传到OSS
+                        oss_url, oss_key = oss_service.upload_file(
+                            file_data=file_data,
+                            filename=filename,
+                            folder='videos'
+                        )
+                        video_urls.append(oss_url)
+                        logger.info(f"视频已上传到OSS: {oss_url}")
+                
+                # 生成视频嵌入代码
+                content = "\n\n".join([f'<video controls width="100%"><source src="{url}" type="video/mp4"></video>' for url in video_urls])
             
             # 确定内容来源
             if content_type == ContentType.WEIXIN:
                 content_source = 'weixin'
             elif content_type == ContentType.MEIPIAN:
                 content_source = 'meipian'
+            elif content_type == ContentType.VIDEO:
+                content_source = 'video'
             elif doc_path:
                 content_source = 'doc'
             elif docx_path:
