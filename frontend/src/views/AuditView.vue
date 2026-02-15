@@ -175,6 +175,76 @@
         </div>
       </div>
     </el-card>
+
+    <!-- 发布对话框 -->
+    <el-dialog
+      v-model="publishDialogVisible"
+      title="发布到WordPress"
+      width="600px"
+    >
+      <el-form label-width="100px">
+        <el-form-item label="选择站点">
+          <el-select
+            v-model="selectedSiteId"
+            placeholder="请选择发布站点"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="site in wordpressSites"
+              :key="site.id"
+              :label="site.name"
+              :value="site.id"
+            >
+              <span>{{ site.name }}</span>
+              <span style="color: #8492a6; font-size: 12px; margin-left: 10px">
+                {{ site.url }}
+              </span>
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="文章标题">
+          <el-input :value="articleTitle" disabled />
+        </el-form-item>
+      </el-form>
+      
+      <!-- 发布历史 -->
+      <div v-if="publishHistory.length > 0" style="margin-top: 20px;">
+        <el-divider content-position="left">发布历史</el-divider>
+        <el-timeline>
+          <el-timeline-item
+            v-for="item in publishHistory"
+            :key="item.id"
+            :timestamp="new Date(item.created_at).toLocaleString('zh-CN')"
+            :type="item.status === 'success' ? 'success' : 'danger'"
+            placement="top"
+          >
+            <div>
+              <el-tag :type="item.status === 'success' ? 'success' : 'danger'" size="small">
+                {{ item.status === 'success' ? '成功' : '失败' }}
+              </el-tag>
+              <span style="margin-left: 10px;">{{ item.site_name }}</span>
+              <span v-if="item.wordpress_post_id" style="margin-left: 10px; color: #909399;">
+                文章ID: {{ item.wordpress_post_id }}
+              </span>
+            </div>
+            <div style="color: #909399; font-size: 12px; margin-top: 5px;">
+              {{ item.message }}
+            </div>
+          </el-timeline-item>
+        </el-timeline>
+      </div>
+      
+      <template #footer>
+        <el-button @click="publishDialogVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="publishLoading"
+          @click="confirmPublish"
+        >
+          确认发布
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -603,9 +673,114 @@ const handleRestoreAI = async () => {
   }
 }
 
-// 发布
-const handlePublish = () => {
-  ElMessage.info('发布功能将在阶段6实现')
+// 发布相关
+const publishDialogVisible = ref(false)
+const publishLoading = ref(false)
+const selectedSiteId = ref(null)
+const wordpressSites = ref([])
+const publishHistory = ref([])
+
+// 加载发布历史
+const loadPublishHistory = async () => {
+  try {
+    const token = localStorage.getItem('access_token')
+    const response = await fetch(`/api/drafts/${draftId.value}/publish-history`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    if (response.ok) {
+      publishHistory.value = await response.json()
+    }
+  } catch (error) {
+    console.error('加载发布历史失败:', error)
+  }
+}
+
+// 加载WordPress站点列表
+const loadWordPressSites = async () => {
+  try {
+    const token = localStorage.getItem('access_token')
+    const response = await fetch('/api/wordpress-sites?active_only=true', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    if (response.ok) {
+      const data = await response.json()
+      wordpressSites.value = data.sites || []
+    } else {
+      console.error('加载站点失败:', response.status, await response.text())
+    }
+  } catch (error) {
+    console.error('加载站点列表失败:', error)
+  }
+}
+
+// 打开发布对话框
+const handlePublish = async () => {
+  if (hasUnsavedChanges.value) {
+    ElMessage.warning('请先保存修改再发布')
+    return
+  }
+  
+  await loadWordPressSites()
+  await loadPublishHistory()
+  
+  if (wordpressSites.value.length === 0) {
+    ElMessage.error('没有可用的WordPress站点，请先配置站点')
+    return
+  }
+  
+  publishDialogVisible.value = true
+}
+
+// 确认发布
+const confirmPublish = async () => {
+  if (!selectedSiteId.value) {
+    ElMessage.warning('请选择发布站点')
+    return
+  }
+  
+  publishLoading.value = true
+  
+  try {
+    const token = localStorage.getItem('access_token')
+    const response = await fetch(`/api/drafts/${draftId.value}/publish`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        site_id: selectedSiteId.value
+      })
+    })
+    
+    const result = await response.json()
+    
+    if (result.success) {
+      ElMessage.success(`${result.message}，文章ID: ${result.wordpress_post_id}`)
+      publishDialogVisible.value = false
+      selectedSiteId.value = null
+      // 重新加载草稿和发布历史
+      await loadDraft()
+      await loadPublishHistory()
+    } else {
+      // 如果是已发布的提示，使用info样式
+      if (result.message && result.message.includes('已发布')) {
+        ElMessage.info(result.message)
+      } else {
+        ElMessage.error(result.message || '发布失败')
+      }
+      // 即使失败也重新加载历史（记录了失败）
+      await loadPublishHistory()
+    }
+  } catch (error) {
+    ElMessage.error('发布失败: ' + error.message)
+  } finally {
+    publishLoading.value = false
+  }
 }
 
 // 格式化日期

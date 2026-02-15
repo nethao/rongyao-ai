@@ -69,6 +69,26 @@ class PublishService:
         )
         
         return content
+    
+    def markdown_to_html(self, markdown_content: str) -> str:
+        """
+        将Markdown转换为HTML
+        
+        Args:
+            markdown_content: Markdown内容
+            
+        Returns:
+            HTML内容
+        """
+        import markdown
+        
+        # 转换Markdown为HTML
+        html = markdown.markdown(
+            markdown_content,
+            extensions=['extra', 'nl2br', 'sane_lists']
+        )
+        
+        return html
 
     async def publish_draft(
         self,
@@ -96,13 +116,16 @@ class PublishService:
         if not draft:
             return False, None, "草稿不存在", None
         
-        # 检查是否已发布
-        if draft.status == "published":
-            return False, None, "草稿已发布", None
+        # 检查是否已发布（移除此检查，允许重复发布）
+        # if draft.status == "published":
+        #     return False, None, "此草稿已发布，无需重复发布", None
         
-        # 获取投稿信息
+        # 获取投稿信息（使用joinedload避免lazy loading）
+        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
-            select(Submission).where(Submission.id == draft.submission_id)
+            select(Submission)
+            .options(selectinload(Submission.images))
+            .where(Submission.id == draft.submission_id)
         )
         submission = result.scalar_one_or_none()
         
@@ -125,6 +148,9 @@ class PublishService:
         # 替换图片URL
         content_with_images = self.replace_image_urls(draft.current_content, submission)
         
+        # 将Markdown转换为HTML
+        content_html = self.markdown_to_html(content_with_images)
+        
         # 生成标题（使用邮件主题或默认标题）
         title = submission.email_subject or "未命名文章"
         
@@ -132,8 +158,24 @@ class PublishService:
         wp_service = WordPressService(site, api_password)
         success, post_id, error_msg = await wp_service.create_post(
             title=title,
-            content=content_with_images,
+            content=content_html,
             status=status
+        )
+        
+        # 记录发布历史
+        from sqlalchemy import text
+        await self.db.execute(
+            text("""
+                INSERT INTO publish_history (draft_id, site_id, wordpress_post_id, status, message)
+                VALUES (:draft_id, :site_id, :post_id, :status, :message)
+            """),
+            {
+                "draft_id": draft_id,
+                "site_id": site_id,
+                "post_id": post_id,
+                "status": "success" if success else "failed",
+                "message": error_msg if not success else f"成功发布到 {site.name}"
+            }
         )
         
         if success:
@@ -148,6 +190,7 @@ class PublishService:
             
             return True, post_id, None, site.name
         else:
+            await self.db.commit()
             return False, None, error_msg, site.name
 
     async def get_published_info(self, draft_id: int) -> Optional[dict]:
@@ -178,3 +221,46 @@ class PublishService:
             "site_name": site.name if site else None,
             "site_url": site.url if site else None
         }
+    
+    async def get_publish_history(self, draft_id: int) -> list[dict]:
+        """
+        获取草稿的发布历史
+        
+        Args:
+            draft_id: 草稿ID
+            
+        Returns:
+            发布历史列表
+        """
+        from sqlalchemy import text
+        result = await self.db.execute(
+            text("""
+                SELECT 
+                    ph.id,
+                    ph.wordpress_post_id,
+                    ph.status,
+                    ph.message,
+                    ph.created_at,
+                    ws.name as site_name,
+                    ws.url as site_url
+                FROM publish_history ph
+                JOIN wordpress_sites ws ON ph.site_id = ws.id
+                WHERE ph.draft_id = :draft_id
+                ORDER BY ph.created_at DESC
+            """),
+            {"draft_id": draft_id}
+        )
+        
+        history = []
+        for row in result:
+            history.append({
+                "id": row.id,
+                "wordpress_post_id": row.wordpress_post_id,
+                "status": row.status,
+                "message": row.message,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "site_name": row.site_name,
+                "site_url": row.site_url
+            })
+        
+        return history

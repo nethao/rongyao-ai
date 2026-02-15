@@ -203,3 +203,17 @@ async def publish_draft(
             message=error_msg,
             site_name=site_name
         )
+
+
+@router.get("/{draft_id}/publish-history")
+async def get_publish_history(
+    draft_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取草稿的发布历史
+    """
+    publish_service = PublishService(db)
+    history = await publish_service.get_publish_history(draft_id)
+    return history
