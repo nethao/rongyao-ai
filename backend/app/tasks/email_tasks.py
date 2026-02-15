@@ -180,26 +180,71 @@ async def process_email(email_data, doc_processor, oss_service):
                         content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
             
             elif content_type == ContentType.ARCHIVE:
-                # 处理压缩包 - 直接上传到OSS
-                archive_urls = []
-                for filename, file_data in email_data.attachments:
-                    if any(filename.lower().endswith(ext) for ext in ['.zip', '.rar', '.7z']):
-                        logger.info(f"发现压缩包: {filename}, 大小: {len(file_data)/1024/1024:.2f}MB")
-                        # 直接上传到OSS
-                        oss_url, oss_key = oss_service.upload_file(
-                            file_data=file_data,
-                            filename=filename,
-                            folder='archives'
-                        )
-                        archive_urls.append((filename, oss_url))
-                        logger.info(f"压缩包已上传到OSS: {oss_url}")
+                # 处理压缩包 - 解压并处理Word+图片
+                import zipfile
+                import tempfile
+                import os
                 
-                # 生成下载链接，并保留邮件正文
-                archive_html = "\n\n".join([f'<p><a href="{url}" download="{name}">📦 下载: {name}</a></p>' for name, url in archive_urls])
-                if content:
-                    content = f"{content}\n\n{archive_html}"
-                else:
-                    content = archive_html
+                for filename, file_data in email_data.attachments:
+                    if filename.lower().endswith('.zip'):
+                        logger.info(f"发现压缩包: {filename}, 大小: {len(file_data)/1024/1024:.2f}MB")
+                        
+                        # 保存压缩包到临时文件
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as zip_file:
+                            zip_file.write(file_data)
+                            zip_path = zip_file.name
+                        
+                        # 解压到临时目录
+                        extract_dir = tempfile.mkdtemp()
+                        try:
+                            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                                zip_ref.extractall(extract_dir)
+                            logger.info(f"压缩包已解压到: {extract_dir}")
+                            
+                            # 查找Word文档
+                            word_file = None
+                            for root, dirs, files in os.walk(extract_dir):
+                                for file in files:
+                                    if file.lower().endswith(('.doc', '.docx')):
+                                        word_file = os.path.join(root, file)
+                                        break
+                                if word_file:
+                                    break
+                            
+                            if word_file:
+                                logger.info(f"找到Word文档: {word_file}")
+                                
+                                # 转换.doc为.docx
+                                if word_file.lower().endswith('.doc'):
+                                    docx_path = doc_processor.convert_doc_to_docx(word_file)
+                                else:
+                                    docx_path = word_file
+                                
+                                # 提取标题
+                                doc_title, title_lines = doc_processor.extract_title_from_docx(docx_path)
+                                if doc_title and doc_title != "无标题":
+                                    title = doc_title
+                                    logger.info(f"从Word文档提取标题: {title}, 占用{title_lines}行")
+                                
+                                # 提取文本（跳过标题行）
+                                content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
+                                
+                                # 提取图片
+                                images = doc_processor.extract_images_from_docx(docx_path)
+                                logger.info(f"从Word文档提取{len(images)}张图片")
+                                
+                                # 上传图片到待上传列表
+                                for img_filename, img_data in images:
+                                    images_to_upload.append((img_filename, img_data))
+                            else:
+                                logger.warning("压缩包中未找到Word文档")
+                                content = "压缩包中未找到Word文档"
+                        
+                        finally:
+                            # 清理临时文件
+                            import shutil
+                            shutil.rmtree(extract_dir, ignore_errors=True)
+                            os.unlink(zip_path)
             
             elif content_type == ContentType.VIDEO:
                 # 处理视频附件 - 直接上传到OSS
@@ -230,7 +275,8 @@ async def process_email(email_data, doc_processor, oss_service):
             elif content_type == ContentType.MEIPIAN:
                 content_source = 'meipian'
             elif content_type == ContentType.ARCHIVE:
-                content_source = 'archive'
+                # 压缩包解压后按Word处理
+                content_source = 'docx'
             elif content_type == ContentType.VIDEO:
                 content_source = 'video'
             elif doc_path:
