@@ -25,17 +25,24 @@ export const Video = Node.create({
     return [
       {
         tag: 'video',
+        getAttrs: (dom) => {
+          const source = dom.querySelector('source')
+          return {
+            src: source?.getAttribute('src') || dom.getAttribute('src'),
+            controls: dom.hasAttribute('controls'),
+            width: dom.getAttribute('width') || '100%',
+          }
+        },
       },
     ]
   },
 
   renderHTML({ HTMLAttributes }) {
+    const { src, controls, width } = HTMLAttributes
     return [
       'video',
-      mergeAttributes(HTMLAttributes, {
-        controls: HTMLAttributes.controls !== false ? '' : null,
-      }),
-      ['source', { src: HTMLAttributes.src, type: 'video/mp4' }],
+      mergeAttributes({ controls: controls ? '' : null, width }),
+      ['source', { src, type: 'video/mp4' }],
     ]
   },
 
@@ -52,3 +59,4 @@ export const Video = Node.create({
     }
   },
 })
+
