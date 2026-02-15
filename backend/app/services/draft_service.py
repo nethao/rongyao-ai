@@ -425,12 +425,24 @@ class DraftService:
             logger.error(error_msg)
             raise ValueError(error_msg)
         
-        # 使用版本内容更新草稿
-        draft = await self.update_draft(
-            draft_id=draft_id,
-            content=version.content,
-            created_by=created_by
-        )
+        # 优先使用 content_md + media_map（占位符协议），否则回退到 content（旧版 HTML）
+        if version.content_md:
+            media = version.media_map if version.media_map is not None else None
+            if media is None:
+                current = await self.get_draft(draft_id)
+                media = (current.media_map if current else None) or {}
+            draft = await self.update_draft(
+                draft_id=draft_id,
+                ai_content_md=version.content_md,
+                media_map=media,
+                created_by=created_by
+            )
+        else:
+            draft = await self.update_draft(
+                draft_id=draft_id,
+                content=version.content,
+                created_by=created_by
+            )
         
         logger.info(
             f"恢复版本成功: draft_id={draft_id}, version_id={version_id}, "
@@ -472,12 +484,23 @@ class DraftService:
             logger.error(error_msg)
             raise ValueError(error_msg)
         
-        # 使用版本1的内容更新草稿
-        draft = await self.update_draft(
-            draft_id=draft_id,
-            content=version.content,
-            created_by=created_by
-        )
+        if version.content_md:
+            media = version.media_map if version.media_map is not None else None
+            if media is None:
+                current = await self.get_draft(draft_id)
+                media = (current.media_map if current else None) or {}
+            draft = await self.update_draft(
+                draft_id=draft_id,
+                ai_content_md=version.content_md,
+                media_map=media,
+                created_by=created_by
+            )
+        else:
+            draft = await self.update_draft(
+                draft_id=draft_id,
+                content=version.content,
+                created_by=created_by
+            )
         
         logger.info(f"恢复AI原始版本成功: draft_id={draft_id}")
         
@@ -589,13 +612,11 @@ class DraftService:
         )
         versions = result.scalars().all()
         
-        # 如果版本数量超过限制，删除旧版本
+        # 如果版本数量超过限制，删除旧版本（delete 非异步，不可 await）
         if len(versions) > keep_count:
             versions_to_delete = versions[keep_count:]
-            
             for version in versions_to_delete:
-                await self.db.delete(version)
-            
+                self.db.delete(version)
             await self.db.commit()
             
             logger.info(

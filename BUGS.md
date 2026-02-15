@@ -2,6 +2,27 @@
 
 ## 🔴 高优先级
 
+### BUG-000: AI 改写失败（LLM 限流/容量限制）
+**状态**: 已定位并增强重试  
+**发现时间**: 2026-02-15  
+**描述**: 点击「AI改写」后任务失败，Celery 日志报 400/503，提示 "Too many requests... throttled due to system capacity limits"
+
+**日志表现** (Celery worker):
+```
+HTTP Request: POST https://dashscope.aliyuncs.com/... "HTTP/1.1 400 Bad Request"
+status_message: "Too many requests. Your requests are being throttled due to system capacity limits. Please try again later."
+```
+
+**根因**: 阿里云 DashScope/灵积 返回 503 限流或容量限制，以 400 形式包在 error body 里，并非本系统代码错误。
+
+**已做**:
+- 在 `transform_tasks.py` 中扩大可重试错误判断：除 `rate limit`、`connection` 外，增加 `throttl`、`too many requests`、`serviceunavailable`，触发时 60 秒后自动重试。
+- 若仍失败：投稿状态为 `failed`，可在投稿列表对该条再次点击「AI 改写」稍后重试，或等 API 限流恢复。
+
+**相关文件**: `backend/app/tasks/transform_tasks.py`
+
+---
+
 ### BUG-001: 公众号排版显示问题
 **状态**: 已修复  
 **发现时间**: 2026-02-15 01:04  

@@ -49,12 +49,8 @@ async def get_draft(
     # === 占位符协议 Hydration ===
     # 如果有新字段，使用占位符协议
     if draft.ai_content_md and draft.media_map:
-        # Hydrate: Markdown + 占位符 → HTML (for Tiptap)
-        hydrated_html = ContentProcessor.hydrate(
-            draft.ai_content_md,
-            draft.media_map
-        )
-        current_content = hydrated_html
+        # 直接返回AI原始Markdown内容（不做hydrate转换）
+        current_content = draft.ai_content_md
     else:
         # 兼容旧数据
         current_content = draft.current_content
@@ -175,7 +171,7 @@ async def restore_version(
         restored_draft = await draft_service.restore_version(
             draft_id=draft_id,
             version_id=restore_request.version_id,
-            user_id=current_user.id
+            created_by=current_user.id
         )
         return restored_draft
     except ValueError as e:

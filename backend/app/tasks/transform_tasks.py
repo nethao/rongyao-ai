@@ -176,9 +176,16 @@ def transform_content_task(self, submission_id: int):
                     message=error_msg
                 )
                 
-                # 重试任务（如果是可重试的错误）
-                if "rate limit" in str(e).lower() or "connection" in str(e).lower():
-                    logger.info(f"将重试任务: submission_id={submission_id}")
+                # 重试任务（限流/容量限制/连接类错误均可重试）
+                err_lower = str(e).lower()
+                if (
+                    "rate limit" in err_lower
+                    or "throttl" in err_lower
+                    or "too many requests" in err_lower
+                    or "connection" in err_lower
+                    or "serviceunavailable" in err_lower
+                ):
+                    logger.info(f"将重试任务(限流/容量限制): submission_id={submission_id}")
                     raise self.retry(exc=e, countdown=60)  # 60秒后重试
                 
                 raise

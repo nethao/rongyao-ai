@@ -14,6 +14,30 @@ class ContentProcessor:
     """
     
     @staticmethod
+    def _sanitize_html(raw_html: str) -> str:
+        """
+        Post-process HTML for Tiptap: remove empty paragraphs, tighten lists.
+        Reduces excessive <p><br></p> and unwraps <p> inside <li> to avoid huge gaps.
+        """
+        soup = BeautifulSoup(raw_html, 'html.parser')
+
+        # 1. Remove empty paragraphs (e.g. <p><br></p> or <p></p>)
+        for p in list(soup.find_all('p')):
+            if not p.get_text(strip=True) and not p.find('img'):
+                if len(p.contents) == 0 or (len(p.contents) == 1 and p.find('br')):
+                    p.decompose()
+
+        # 2. Fix list items: unwrap <p> inside <li>, remove empty <li>
+        for li in list(soup.find_all('li')):
+            if not li.get_text(strip=True) and not li.find('img'):
+                li.decompose()
+                continue
+            for p in li.find_all('p'):
+                p.unwrap()
+
+        return str(soup)
+
+    @staticmethod
     def hydrate(md_text: str, media_map: Dict[str, str]) -> str:
         """
         Hydration: Markdown + 占位符 → HTML (用于Tiptap加载)
@@ -37,17 +61,13 @@ class ContentProcessor:
             extensions=['extra', 'sane_lists']  # 移除nl2br，避免过多换行
         )
         
-        # 3. 替换占位符为img标签
+        # 3. Sanitize: 移除空段落、收紧列表，避免 Tiptap 中大片空白
+        html = ContentProcessor._sanitize_html(html)
+        
+        # 4. 替换占位符为img标签
         for placeholder, oss_url in (media_map or {}).items():
-            # 生成带data-id的img标签
             img_tag = f'<img src="{oss_url}" data-id="{placeholder}" style="max-width:100%; height:auto;" alt="图片" />'
             html = html.replace(placeholder, img_tag)
-        
-        # 4. 清理多余的空段落和空列表项
-        html = re.sub(r'<p>\s*</p>', '', html)
-        html = re.sub(r'<p>\s*<br\s*/?\s*>\s*</p>', '', html)
-        html = re.sub(r'<li>\s*<p>\s*<br\s*/?\s*>\s*</p>\s*</li>', '', html)
-        html = re.sub(r'<li>\s*</li>', '', html)
         
         return html
     
