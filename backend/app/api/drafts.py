@@ -65,6 +65,15 @@ async def get_draft(
     else:
         current_content = draft.current_content
     
+    # 处理原始内容：如果是Word文档且有占位符，也需要hydrate
+    original_content_display = draft.submission.original_content
+    if draft.submission.content_source in ['doc', 'docx'] and media_map:
+        # Word文档：将原始内容中的占位符替换为图片
+        original_content_display = ContentProcessor.hydrate(
+            draft.submission.original_content,
+            media_map
+        )
+    
     # 构建响应
     draft_dict = {
         "id": draft.id,
@@ -78,7 +87,7 @@ async def get_draft(
         "wordpress_post_id": draft.wordpress_post_id,
         "created_at": draft.created_at,
         "updated_at": draft.updated_at,
-        "original_content": draft.submission.original_content,
+        "original_content": original_content_display,  # Word文档显示带图片的HTML
         "original_html": draft.submission.original_html,
         "email_subject": draft.submission.email_subject,
         "content_source": draft.submission.content_source
