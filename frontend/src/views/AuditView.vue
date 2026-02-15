@@ -8,6 +8,12 @@
             返回列表
           </el-button>
           <h2>内容审核</h2>
+          <el-tag v-if="contentSource" :type="getSourceTagType(contentSource)" size="large" style="margin-left: 12px;">
+            <el-icon style="margin-right: 4px;">
+              <component :is="getSourceIcon(contentSource)" />
+            </el-icon>
+            {{ getSourceLabel(contentSource) }}
+          </el-tag>
         </div>
         <div class="header-right">
           <el-button type="warning" @click="handleRestoreAI">
@@ -287,7 +293,11 @@ import {
   Upload,
   Edit,
   Document,
-  InfoFilled
+  InfoFilled,
+  Link,
+  Picture,
+  Folder,
+  VideoCamera
 } from '@element-plus/icons-vue'
 import { getDraft, updateDraft, getDraftVersions, restoreVersion, restoreAIVersion } from '../api/draft'
 import { triggerTransform } from '../api/submission'
@@ -708,6 +718,45 @@ const handleRestoreAI = async () => {
     hasUnsavedChanges.value = false
     tiptapRef.value?.setHTML?.(editableHtml.value)
     ElMessage.success('已恢复到AI原始版本')
+
+// 获取来源图标
+const getSourceIcon = (source) => {
+  const icons = {
+    weixin: Link,
+    meipian: Picture,
+    doc: Document,
+    docx: Document,
+    video: VideoCamera,
+    text: Document
+  }
+  return icons[source] || Document
+}
+
+// 获取来源标签
+const getSourceLabel = (source) => {
+  const labels = {
+    weixin: '微信公众号',
+    meipian: '美篇',
+    doc: 'Word文档',
+    docx: 'Word文档',
+    video: '视频',
+    text: '文本'
+  }
+  return labels[source] || '未知'
+}
+
+// 获取标签类型
+const getSourceTagType = (source) => {
+  const types = {
+    weixin: 'success',
+    meipian: 'warning',
+    doc: 'primary',
+    docx: 'primary',
+    video: 'danger',
+    text: 'info'
+  }
+  return types[source] || 'info'
+}
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('恢复失败: ' + (error.message || '未知错误'))
