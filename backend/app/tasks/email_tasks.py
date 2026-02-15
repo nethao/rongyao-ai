@@ -194,8 +194,13 @@ async def process_email(email_data, doc_processor, oss_service):
                         video_urls.append(oss_url)
                         logger.info(f"视频已上传到OSS: {oss_url}")
                 
-                # 生成视频嵌入代码
-                content = "\n\n".join([f'<video controls width="100%"><source src="{url}" type="video/mp4"></video>' for url in video_urls])
+                # 生成视频嵌入代码，并保留邮件正文
+                video_html = "\n\n".join([f'<video controls width="100%"><source src="{url}" type="video/mp4"></video>' for url in video_urls])
+                if content:
+                    # 邮件正文 + 视频
+                    content = f"{content}\n\n{video_html}"
+                else:
+                    content = video_html
             
             # 确定内容来源
             if content_type == ContentType.WEIXIN:
