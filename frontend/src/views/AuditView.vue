@@ -763,7 +763,6 @@ const getSourceTagType = (source) => {
   }
   return types[source] || 'info'
 }
-}
 
 // 发布相关
 const publishDialogVisible = ref(false)
