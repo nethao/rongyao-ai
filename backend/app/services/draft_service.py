@@ -112,16 +112,22 @@ class DraftService:
     async def create_draft(
         self,
         submission_id: int,
-        transformed_content: str,
-        created_by: Optional[int] = None
+        transformed_content: str = None,
+        created_by: Optional[int] = None,
+        original_content_md: str = None,
+        ai_content_md: str = None,
+        media_map: dict = None
     ) -> Draft:
         """
         创建草稿（使用占位符协议）
         
         Args:
             submission_id: 投稿ID
-            transformed_content: AI转换后的内容（Markdown格式）
+            transformed_content: AI转换后的内容（Markdown格式，旧方式）
             created_by: 创建者用户ID（可选）
+            original_content_md: 原始Markdown（带占位符，新方式）
+            ai_content_md: AI转换后的Markdown（带占位符，新方式）
+            media_map: 占位符映射（新方式）
         
         Returns:
             创建的草稿对象
@@ -145,12 +151,6 @@ class DraftService:
             logger.error(error_msg)
             raise ValueError(error_msg)
         
-        # 验证内容不为空
-        if not transformed_content or not transformed_content.strip():
-            error_msg = "转换后的内容不能为空"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        
         # 检查是否已存在草稿
         existing_draft = await self.get_draft_by_submission(submission_id)
         if existing_draft:
@@ -161,32 +161,45 @@ class DraftService:
             # 如果已存在草稿，更新内容而不是创建新草稿
             return await self.update_draft(
                 existing_draft.id,
-                transformed_content,
-                created_by=created_by
+                transformed_content=transformed_content,
+                created_by=created_by,
+                ai_content_md=ai_content_md,
+                media_map=media_map
             )
         
         # === 占位符协议处理 ===
-        # 1. 从投稿图片生成media_map
-        images_data = [
-            {"oss_url": img.oss_url, "original_filename": img.original_filename}
-            for img in submission.images
-        ]
-        
-        # 2. 提取图片并生成占位符
-        content_md, media_map = ContentProcessor.extract_images_from_content(
-            transformed_content, 
-            images_data
-        )
-        
-        # 3. 格式化内容（用于旧字段兼容）
-        formatted_content = self.format_content_for_wordpress(transformed_content)
+        # 如果直接传入了占位符数据（新方式），直接使用
+        if original_content_md and ai_content_md and media_map is not None:
+            content_md = ai_content_md
+            final_media_map = media_map
+            formatted_content = ai_content_md  # 直接存储Markdown
+        else:
+            # 否则从transformed_content提取（旧方式，向后兼容）
+            if not transformed_content or not transformed_content.strip():
+                error_msg = "转换后的内容不能为空"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            # 1. 从投稿图片生成media_map
+            images_data = [
+                {"oss_url": img.oss_url, "original_filename": img.original_filename}
+                for img in submission.images
+            ]
+            
+            # 2. 提取图片并生成占位符
+            content_md, final_media_map = ContentProcessor.extract_images_from_content(
+                transformed_content, 
+                images_data
+            )
+            original_content_md = content_md
+            formatted_content = self.format_content_for_wordpress(transformed_content)
         
         # 创建草稿记录
         draft = Draft(
             submission_id=submission_id,
-            original_content_md=content_md,  # 新字段：带占位符的Markdown
-            ai_content_md=content_md,  # 初始时与原文相同
-            media_map=media_map,  # 新字段：占位符映射
+            original_content_md=original_content_md,  # 新字段：带占位符的Markdown
+            ai_content_md=content_md,  # AI转换后的Markdown
+            media_map=final_media_map,  # 新字段：占位符映射
             current_content=formatted_content,  # 旧字段：保留兼容
             current_version=1,
             status='draft'
@@ -201,7 +214,7 @@ class DraftService:
             version_number=1,
             content=formatted_content,  # 旧字段
             content_md=content_md,  # 新字段：Markdown
-            media_map=media_map,  # 新字段：映射
+            media_map=final_media_map,  # 新字段：映射
             created_by=created_by
         )
         
@@ -211,7 +224,7 @@ class DraftService:
         
         logger.info(
             f"草稿创建成功（占位符协议）: draft_id={draft.id}, "
-            f"submission_id={submission_id}, placeholders={len(media_map)}"
+            f"submission_id={submission_id}, placeholders={len(final_media_map)}"
         )
         
         return draft
@@ -219,16 +232,22 @@ class DraftService:
     async def update_draft(
         self,
         draft_id: int,
-        content: str,
-        created_by: Optional[int] = None
+        content: str = None,
+        created_by: Optional[int] = None,
+        transformed_content: str = None,
+        ai_content_md: str = None,
+        media_map: dict = None
     ) -> Draft:
         """
         更新草稿内容（创建新版本）
         
         Args:
             draft_id: 草稿ID
-            content: 新的内容
+            content: 新的内容（旧方式）
             created_by: 创建者用户ID（可选）
+            transformed_content: AI转换后的内容（旧方式）
+            ai_content_md: AI转换后的Markdown（带占位符，新方式）
+            media_map: 占位符映射（新方式）
         
         Returns:
             更新后的草稿对象
@@ -243,20 +262,34 @@ class DraftService:
             logger.error(error_msg)
             raise ValueError(error_msg)
         
-        # 验证内容不为空
-        if not content or not content.strip():
-            error_msg = "内容不能为空"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        
-        # 检查内容是否有变化
-        if content.strip() == draft.current_content.strip():
-            logger.info(f"内容未变化，不创建新版本: draft_id={draft_id}")
-            return draft
+        # 使用新方式或旧方式
+        if ai_content_md and media_map is not None:
+            # 新方式：直接存储Markdown，不做格式化
+            content_md = ai_content_md
+            final_media_map = media_map
+            formatted_content = ai_content_md  # 直接存储Markdown
+        else:
+            # 旧方式：使用content或transformed_content
+            actual_content = content or transformed_content
+            if not actual_content or not actual_content.strip():
+                error_msg = "内容不能为空"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            # 检查内容是否有变化
+            if actual_content.strip() == draft.current_content.strip():
+                logger.info(f"内容未变化，不创建新版本: draft_id={draft_id}")
+                return draft
+            
+            content_md = actual_content
+            final_media_map = draft.media_map or {}
+            formatted_content = actual_content
         
         # 更新草稿当前内容和版本号
         new_version_number = draft.current_version + 1
-        draft.current_content = content
+        draft.ai_content_md = content_md
+        draft.media_map = final_media_map
+        draft.current_content = formatted_content
         draft.current_version = new_version_number
         draft.updated_at = datetime.utcnow()
         
@@ -264,7 +297,9 @@ class DraftService:
         version = DraftVersion(
             draft_id=draft_id,
             version_number=new_version_number,
-            content=content,
+            content=formatted_content,
+            content_md=content_md,
+            media_map=final_media_map,
             created_by=created_by
         )
         
@@ -274,7 +309,7 @@ class DraftService:
         
         logger.info(
             f"草稿更新成功: draft_id={draft_id}, new_version={new_version_number}, "
-            f"content_length={len(content)}"
+            f"content_length={len(content_md)}"
         )
         
         # 清理旧版本（保留最近30个）

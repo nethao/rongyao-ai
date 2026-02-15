@@ -356,11 +356,28 @@ async def process_email(email_data, doc_processor, oss_service):
             
             # 创建原文草稿（供编辑人员查看和手动编辑）
             from app.services.draft_service import DraftService
+            from app.utils.content_processor import ContentProcessor
             draft_service = DraftService(db)
             
-            # 公众号和美篇使用HTML格式，其他使用Markdown格式
+            # 公众号和美篇：将HTML转换为Markdown，并插入占位符
             if (content_type == ContentType.WEIXIN or content_type == ContentType.MEIPIAN) and original_html:
-                draft_content = original_html
+                import html2text
+                from bs4 import BeautifulSoup
+                
+                # 先用BeautifulSoup替换img标签为占位符
+                soup = BeautifulSoup(original_html, 'html.parser')
+                img_tags = soup.find_all('img')
+                
+                for idx, img in enumerate(img_tags, start=1):
+                    placeholder = f'[[IMG_{idx}]]'
+                    img.replace_with(placeholder)
+                
+                # 转换为Markdown
+                h = html2text.HTML2Text()
+                h.ignore_links = False
+                h.ignore_images = False
+                h.body_width = 0
+                draft_content = h.handle(str(soup))
             else:
                 draft_content = content
             

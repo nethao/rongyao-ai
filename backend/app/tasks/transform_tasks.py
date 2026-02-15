@@ -88,54 +88,49 @@ def transform_content_task(self, submission_id: int):
                     f"reference_date={reference_date}"
                 )
                 
-                # 提取原文中的图片标记并用占位符替换
-                import re
-                img_pattern = r'!\[图片\d+\]\([^\)]+\)'
-                original_images = re.findall(img_pattern, submission.original_content)
+                # 使用占位符协议：从submission.images生成占位符
+                from app.utils.content_processor import ContentProcessor
                 
-                # 用占位符替换图片，保留位置
-                text_with_placeholders = submission.original_content
-                for idx, img_md in enumerate(original_images):
-                    text_with_placeholders = text_with_placeholders.replace(
-                        img_md, 
-                        f'[IMAGE_PLACEHOLDER_{idx}]', 
-                        1  # 只替换第一个匹配
-                    )
+                # 获取图片列表（按ID排序）
+                images = [
+                    {"oss_url": img.oss_url, "original_filename": img.original_filename}
+                    for img in sorted(submission.images, key=lambda x: x.id)
+                ]
                 
-                # 清理多余空行
-                text_with_placeholders = re.sub(r'\n{3,}', '\n\n', text_with_placeholders).strip()
+                # 生成带占位符的Markdown和media_map
+                original_md, media_map = ContentProcessor.extract_images_from_content(
+                    submission.original_content,
+                    images
+                )
                 
                 logger.info(
                     f"原文处理: 总长度={len(submission.original_content)}, "
-                    f"带占位符={len(text_with_placeholders)}, 图片={len(original_images)}"
+                    f"带占位符={len(original_md)}, 图片={len(images)}"
                 )
                 
-                # 调用LLM进行转换（包含占位符）
-                transformed_content = await llm_service.transform_text(
-                    text=text_with_placeholders,
+                # 调用LLM进行转换（AI只看到占位符，不看到URL）
+                transformed_md = await llm_service.transform_text(
+                    text=original_md,
                     system_prompt=system_prompt,
                     temperature=0.7
                 )
                 
-                # 将占位符替换回图片Markdown
-                for idx, img_md in enumerate(original_images):
-                    placeholder = f'[IMAGE_PLACEHOLDER_{idx}]'
-                    transformed_content = transformed_content.replace(placeholder, f'\n{img_md}\n')
-                
                 logger.info(
                     f"AI转换完成: submission_id={submission_id}, "
                     f"原文长度={len(submission.original_content)}, "
-                    f"转换后长度={len(transformed_content)}, "
-                    f"图片数量={len(original_images)}"
+                    f"转换后长度={len(transformed_md)}, "
+                    f"图片数量={len(images)}"
                 )
                 
-                # 创建草稿记录
+                # 创建草稿记录（使用占位符协议）
                 from app.services.draft_service import DraftService
                 draft_service = DraftService(db)
                 
                 draft = await draft_service.create_draft(
                     submission_id=submission_id,
-                    transformed_content=transformed_content
+                    original_content_md=original_md,
+                    ai_content_md=transformed_md,
+                    media_map=media_map
                 )
                 
                 logger.info(f"草稿创建成功: draft_id={draft.id}")
@@ -159,7 +154,7 @@ def transform_content_task(self, submission_id: int):
                     "submission_id": submission_id,
                     "draft_id": draft.id,
                     "original_length": len(submission.original_content),
-                    "transformed_length": len(transformed_content)
+                    "transformed_length": len(transformed_md)
                 }
             
             except LLMServiceError as e:

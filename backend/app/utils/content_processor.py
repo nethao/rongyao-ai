@@ -28,17 +28,26 @@ class ContentProcessor:
         if not md_text:
             return ""
         
-        # 1. 先将Markdown转换为HTML
+        # 1. 清理Markdown中的多余空行（3个以上连续换行 -> 2个）
+        md_text = re.sub(r'\n{3,}', '\n\n', md_text)
+        
+        # 2. 将Markdown转换为HTML
         html = markdown.markdown(
             md_text,
-            extensions=['extra', 'nl2br', 'sane_lists']
+            extensions=['extra', 'sane_lists']  # 移除nl2br，避免过多换行
         )
         
-        # 2. 替换占位符为img标签
+        # 3. 替换占位符为img标签
         for placeholder, oss_url in (media_map or {}).items():
             # 生成带data-id的img标签
             img_tag = f'<img src="{oss_url}" data-id="{placeholder}" style="max-width:100%; height:auto;" alt="图片" />'
             html = html.replace(placeholder, img_tag)
+        
+        # 4. 清理多余的空段落和空列表项
+        html = re.sub(r'<p>\s*</p>', '', html)
+        html = re.sub(r'<p>\s*<br\s*/?\s*>\s*</p>', '', html)
+        html = re.sub(r'<li>\s*<p>\s*<br\s*/?\s*>\s*</p>\s*</li>', '', html)
+        html = re.sub(r'<li>\s*</li>', '', html)
         
         return html
     
@@ -133,16 +142,14 @@ class ContentProcessor:
             placeholder = f'[[IMG_{idx}]]'
             media_map[placeholder] = img['oss_url']
             
-            # 替换Markdown图片语法
-            # ![图片1](url) → [[IMG_1]]
+            # 替换Markdown图片语法: ![图片N](url) → [[IMG_N]]
+            pattern = rf'!\[图片{idx}\]\([^\)]+\)'
+            content_with_placeholders = re.sub(pattern, placeholder, content_with_placeholders)
+            
+            # 替换其他可能的格式
             if img.get('original_filename'):
                 pattern = rf'!\[([^\]]*)\]\({re.escape(img["original_filename"])}\)'
                 content_with_placeholders = re.sub(pattern, placeholder, content_with_placeholders)
-            
-            # 替换直接的URL引用
-            content_with_placeholders = content_with_placeholders.replace(
-                f'![图片{idx}]', placeholder
-            )
         
         return content_with_placeholders, media_map
     

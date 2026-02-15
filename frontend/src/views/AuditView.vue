@@ -79,6 +79,13 @@
                 <el-icon><Edit /></el-icon>
                 AI改写
               </el-button>
+              <el-button
+                @click="showSourceCode = !showSourceCode"
+                :type="showSourceCode ? 'warning' : 'default'"
+              >
+                <el-icon><Document /></el-icon>
+                {{ showSourceCode ? '可视化' : '源码' }}
+              </el-button>
               <el-tag v-if="hasUnsavedChanges" type="warning">未保存</el-tag>
               <el-tag v-else type="success">已保存</el-tag>
               <span class="version-info">版本 {{ currentVersion }}</span>
@@ -109,8 +116,19 @@
               <p class="progress-tip">正在保持图文排版进行智能改写，请稍候...</p>
             </div>
             
+            <!-- 源码编辑器 -->
+            <el-input
+              v-if="showSourceCode"
+              v-model="editableHtml"
+              type="textarea"
+              @input="handleContentChange"
+              placeholder="HTML源码"
+              class="source-code-editor"
+            />
             
+            <!-- 可视化编辑器 -->
             <TiptapEditor
+              v-else
               ref="tiptapRef"
               v-model="editableHtml"
               @change="handleContentChange"
@@ -257,7 +275,8 @@ import {
   RefreshLeft,
   Check,
   Upload,
-  Edit
+  Edit,
+  Document
 } from '@element-plus/icons-vue'
 import { getDraft, updateDraft, getDraftVersions, restoreVersion, restoreAIVersion } from '../api/draft'
 import { triggerTransform } from '../api/submission'
@@ -271,6 +290,7 @@ const route = useRoute()
 const loading = ref(false)
 const saving = ref(false)
 const transforming = ref(false)
+const showSourceCode = ref(false)  // 源码模式
 const draftId = ref(null)
 const submissionId = ref(null)
 const articleTitle = ref('')
@@ -1105,5 +1125,19 @@ onBeforeUnmount(() => {
   text-align: center;
   font-size: 13px;
   color: #606266;
+}
+
+/* 源码编辑器 */
+.source-code-editor {
+  font-family: 'Courier New', Consolas, monospace;
+  font-size: 13px;
+  height: 100%;
+}
+
+.source-code-editor :deep(textarea) {
+  font-family: 'Courier New', Consolas, monospace;
+  line-height: 1.6;
+  height: 100% !important;
+  resize: none;
 }
 </style>

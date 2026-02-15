@@ -322,6 +322,8 @@ class LLMService:
         
         try:
             logger.info(f"Calling LLM API with model: {self.model}, text length: {len(text)}")
+            logger.info(f"=== AI输入 (System Prompt前500字符) ===\n{system_prompt[:500]}")
+            logger.info(f"=== AI输入 (User Content) ===\n{text}")
             
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -338,6 +340,8 @@ class LLMService:
             
             # 提取转换后的文本
             transformed_text = response.choices[0].message.content
+            
+            logger.info(f"=== AI输出 ===\n{transformed_text}")
             
             # 验证转换内容质量
             self._validate_transformed_content(text, transformed_text)
