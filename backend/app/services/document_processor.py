@@ -98,12 +98,13 @@ class DocumentProcessor:
             logger.error(f"文档转换异常: {str(e)}")
             raise
     
-    def extract_text_from_docx(self, docx_path: str) -> str:
+    def extract_text_from_docx(self, docx_path: str, skip_title_lines: int = 0) -> str:
         """
         从.docx文件提取文本内容（带图片占位符）
         
         Args:
             docx_path: .docx文件路径
+            skip_title_lines: 跳过前N行（用于跳过标题）
         
         Returns:
             str: 提取的文本内容，图片位置用[[IMG_N]]标记
@@ -117,6 +118,7 @@ class DocumentProcessor:
             # 提取所有段落和表格的文本
             text_parts = []
             image_counter = 1
+            line_counter = 0
             
             for element in doc.element.body:
                 if isinstance(element, CT_P):
@@ -135,7 +137,10 @@ class DocumentProcessor:
                     
                     # 如果没有图片，添加文本
                     if not has_image and paragraph.text.strip():
-                        text_parts.append(paragraph.text)
+                        line_counter += 1
+                        # 跳过标题行
+                        if line_counter > skip_title_lines:
+                            text_parts.append(paragraph.text)
                 
                 elif isinstance(element, CT_Tbl):
                     # 表格
@@ -146,14 +151,14 @@ class DocumentProcessor:
                             text_parts.append(row_text)
             
             content = '\n'.join(text_parts)
-            logger.info(f"成功提取文本，长度: {len(content)}, 图片数量: {image_counter - 1}")
+            logger.info(f"成功提取文本，长度: {len(content)}, 图片数量: {image_counter - 1}, 跳过行数: {skip_title_lines}")
             return content
         
         except Exception as e:
             logger.error(f"提取文本失败: {str(e)}")
             raise
     
-    def extract_title_from_docx(self, docx_path: str) -> str:
+    def extract_title_from_docx(self, docx_path: str) -> tuple[str, int]:
         """
         从.docx文件提取标题
         
@@ -165,7 +170,7 @@ class DocumentProcessor:
             docx_path: .docx文件路径
         
         Returns:
-            str: 提取的标题
+            tuple[str, int]: (提取的标题, 标题占用的行数)
         """
         if not os.path.exists(docx_path):
             raise FileNotFoundError(f"文件不存在: {docx_path}")
@@ -182,23 +187,23 @@ class DocumentProcessor:
                         break
             
             if not lines:
-                return "无标题"
+                return "无标题", 0
             
             # 如果只有一行，直接返回
             if len(lines) == 1:
-                return lines[0]
+                return lines[0], 1
             
             # 如果第二行以--开头，组合为完整标题
             if lines[1].startswith('--'):
                 subtitle = lines[1].lstrip('-').strip()
-                return f"{lines[0]}——{subtitle}"
+                return f"{lines[0]}——{subtitle}", 2
             else:
                 # 否则只返回第一行
-                return lines[0]
+                return lines[0], 1
         
         except Exception as e:
             logger.error(f"提取标题失败: {str(e)}")
-            return "无标题"
+            return "无标题", 0
     
     def extract_images_from_docx(
         self,

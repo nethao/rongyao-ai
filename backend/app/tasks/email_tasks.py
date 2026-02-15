@@ -161,23 +161,23 @@ async def process_email(email_data, doc_processor, oss_service):
                         doc_path = temp_file.name
                         # 转换为docx
                         docx_path = doc_processor.convert_doc_to_docx(doc_path)
-                        # 提取文本
-                        content = doc_processor.extract_text_from_docx(docx_path)
-                        # 提取标题（覆盖邮件主题中的title）
-                        doc_title = doc_processor.extract_title_from_docx(docx_path)
+                        # 先提取标题
+                        doc_title, title_lines = doc_processor.extract_title_from_docx(docx_path)
                         if doc_title and doc_title != "无标题":
                             title = doc_title
-                            logger.info(f"从Word文档提取标题: {title}")
+                            logger.info(f"从Word文档提取标题: {title}, 占用{title_lines}行")
+                        # 提取文本时跳过标题行
+                        content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
                     
                     elif filename.lower().endswith('.docx'):
                         docx_path = temp_file.name
-                        # 提取文本
-                        content = doc_processor.extract_text_from_docx(docx_path)
-                        # 提取标题
-                        doc_title = doc_processor.extract_title_from_docx(docx_path)
+                        # 先提取标题
+                        doc_title, title_lines = doc_processor.extract_title_from_docx(docx_path)
                         if doc_title and doc_title != "无标题":
                             title = doc_title
-                            logger.info(f"从Word文档提取标题: {title}")
+                            logger.info(f"从Word文档提取标题: {title}, 占用{title_lines}行")
+                        # 提取文本时跳过标题行
+                        content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
             
             elif content_type == ContentType.VIDEO:
                 # 处理视频附件
