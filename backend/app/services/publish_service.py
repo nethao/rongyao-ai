@@ -145,17 +145,22 @@ class PublishService:
         if not api_password:
             return False, None, "站点未配置API密码", site.name
         
-        # 替换图片URL
-        content_with_images = self.replace_image_urls(draft.current_content, submission)
-        
-        # 将Markdown转换为HTML
-        content_html = self.markdown_to_html(content_with_images)
-        
-        # 生成标题（使用邮件主题或默认标题）
-        title = submission.email_subject or "未命名文章"
-        
         # 发布到WordPress
         wp_service = WordPressService(site, api_password)
+        
+        # === 占位符协议渲染 ===
+        # 如果有新字段，使用占位符协议渲染
+        if draft.ai_content_md and draft.media_map:
+            from app.utils.content_processor import ContentProcessor
+            content_html = ContentProcessor.render_for_wordpress(
+                draft.ai_content_md,
+                draft.media_map
+            )
+        else:
+            # 兼容旧数据：替换图片URL并转换Markdown
+            content_with_images = self.replace_image_urls(draft.current_content, submission)
+            content_html = self.markdown_to_html(content_with_images)
+        
         success, post_id, error_msg = await wp_service.create_post(
             title=title,
             content=content_html,

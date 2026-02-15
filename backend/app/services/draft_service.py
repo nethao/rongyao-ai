@@ -116,11 +116,11 @@ class DraftService:
         created_by: Optional[int] = None
     ) -> Draft:
         """
-        创建草稿
+        创建草稿（使用占位符协议）
         
         Args:
             submission_id: 投稿ID
-            transformed_content: AI转换后的内容
+            transformed_content: AI转换后的内容（Markdown格式）
             created_by: 创建者用户ID（可选）
         
         Returns:
@@ -129,9 +129,14 @@ class DraftService:
         Raises:
             ValueError: 如果投稿不存在或内容为空
         """
-        # 验证投稿是否存在
+        from app.utils.content_processor import ContentProcessor
+        from sqlalchemy.orm import selectinload
+        
+        # 验证投稿是否存在并加载图片
         result = await self.db.execute(
-            select(Submission).where(Submission.id == submission_id)
+            select(Submission)
+            .options(selectinload(Submission.images))
+            .where(Submission.id == submission_id)
         )
         submission = result.scalar_one_or_none()
         
@@ -160,13 +165,29 @@ class DraftService:
                 created_by=created_by
             )
         
-        # 格式化内容（添加HTML标签和首行缩进）
+        # === 占位符协议处理 ===
+        # 1. 从投稿图片生成media_map
+        images_data = [
+            {"oss_url": img.oss_url, "original_filename": img.original_filename}
+            for img in submission.images
+        ]
+        
+        # 2. 提取图片并生成占位符
+        content_md, media_map = ContentProcessor.extract_images_from_content(
+            transformed_content, 
+            images_data
+        )
+        
+        # 3. 格式化内容（用于旧字段兼容）
         formatted_content = self.format_content_for_wordpress(transformed_content)
         
         # 创建草稿记录
         draft = Draft(
             submission_id=submission_id,
-            current_content=formatted_content,
+            original_content_md=content_md,  # 新字段：带占位符的Markdown
+            ai_content_md=content_md,  # 初始时与原文相同
+            media_map=media_map,  # 新字段：占位符映射
+            current_content=formatted_content,  # 旧字段：保留兼容
             current_version=1,
             status='draft'
         )
@@ -178,7 +199,9 @@ class DraftService:
         version = DraftVersion(
             draft_id=draft.id,
             version_number=1,
-            content=formatted_content,
+            content=formatted_content,  # 旧字段
+            content_md=content_md,  # 新字段：Markdown
+            media_map=media_map,  # 新字段：映射
             created_by=created_by
         )
         
@@ -187,8 +210,8 @@ class DraftService:
         await self.db.refresh(draft)
         
         logger.info(
-            f"草稿创建成功: draft_id={draft.id}, submission_id={submission_id}, "
-            f"content_length={len(transformed_content)}"
+            f"草稿创建成功（占位符协议）: draft_id={draft.id}, "
+            f"submission_id={submission_id}, placeholders={len(media_map)}"
         )
         
         return draft

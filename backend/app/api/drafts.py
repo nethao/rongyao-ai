@@ -32,8 +32,10 @@ async def get_draft(
     current_user: User = Depends(get_current_user)
 ):
     """
-    获取草稿详情（包含原文）
+    获取草稿详情（使用占位符协议 - Hydration）
     """
+    from app.utils.content_processor import ContentProcessor
+    
     # 查询草稿及关联的投稿
     query = select(Draft).where(Draft.id == draft_id).options(
         selectinload(Draft.submission)
@@ -44,11 +46,24 @@ async def get_draft(
     if not draft:
         raise HTTPException(status_code=404, detail="草稿不存在")
     
+    # === 占位符协议 Hydration ===
+    # 如果有新字段，使用占位符协议
+    if draft.ai_content_md and draft.media_map:
+        # Hydrate: Markdown + 占位符 → HTML (for Tiptap)
+        hydrated_html = ContentProcessor.hydrate(
+            draft.ai_content_md,
+            draft.media_map
+        )
+        current_content = hydrated_html
+    else:
+        # 兼容旧数据
+        current_content = draft.current_content
+    
     # 构建响应
     draft_dict = {
         "id": draft.id,
         "submission_id": draft.submission_id,
-        "current_content": draft.current_content,
+        "current_content": current_content,  # 返回hydrated HTML
         "current_version": draft.current_version,
         "status": draft.status,
         "published_at": draft.published_at,
@@ -59,7 +74,7 @@ async def get_draft(
         "original_content": draft.submission.original_content,
         "original_html": draft.submission.original_html,
         "email_subject": draft.submission.email_subject,
-        "content_source": draft.submission.content_source  # 添加内容来源
+        "content_source": draft.submission.content_source
     }
     
     return draft_dict
@@ -73,19 +88,47 @@ async def update_draft(
     current_user: User = Depends(get_current_user)
 ):
     """
-    更新草稿内容（创建新版本）
+    更新草稿内容（使用占位符协议 - Dehydration）
     """
-    draft_service = DraftService(db)
+    from app.utils.content_processor import ContentProcessor
     
-    try:
-        updated_draft = await draft_service.update_draft(
-            draft_id=draft_id,
-            content=draft_update.content,
-            created_by=current_user.id
-        )
-        return updated_draft
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    # 获取当前草稿
+    result = await db.execute(
+        select(Draft).where(Draft.id == draft_id)
+    )
+    draft = result.scalar_one_or_none()
+    
+    if not draft:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    
+    # === 占位符协议 Dehydration ===
+    # Dehydrate: HTML → Markdown + 占位符
+    new_md, new_media_map = ContentProcessor.dehydrate(
+        draft_update.content,
+        draft.media_map or {}
+    )
+    
+    # 更新草稿
+    draft.ai_content_md = new_md
+    draft.media_map = new_media_map
+    draft.current_content = draft_update.content  # 保留旧字段兼容
+    draft.current_version += 1
+    
+    # 创建版本记录
+    version = DraftVersion(
+        draft_id=draft.id,
+        version_number=draft.current_version,
+        content=draft_update.content,  # 旧字段
+        content_md=new_md,  # 新字段
+        media_map=new_media_map,  # 新字段
+        created_by=current_user.id
+    )
+    
+    db.add(version)
+    await db.commit()
+    await db.refresh(draft)
+    
+    return draft
 
 
 @router.get("/{draft_id}/versions", response_model=DraftVersionListResponse)
