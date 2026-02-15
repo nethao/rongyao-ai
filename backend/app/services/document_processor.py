@@ -100,13 +100,13 @@ class DocumentProcessor:
     
     def extract_text_from_docx(self, docx_path: str) -> str:
         """
-        从.docx文件提取文本内容
+        从.docx文件提取文本内容（带图片占位符）
         
         Args:
             docx_path: .docx文件路径
         
         Returns:
-            str: 提取的文本内容
+            str: 提取的文本内容，图片位置用[[IMG_N]]标记
         """
         if not os.path.exists(docx_path):
             raise FileNotFoundError(f"文件不存在: {docx_path}")
@@ -116,12 +116,25 @@ class DocumentProcessor:
             
             # 提取所有段落和表格的文本
             text_parts = []
+            image_counter = 1
             
             for element in doc.element.body:
                 if isinstance(element, CT_P):
                     # 段落
                     paragraph = Paragraph(element, doc)
-                    if paragraph.text.strip():
+                    
+                    # 检查段落中是否有图片
+                    has_image = False
+                    for run in paragraph.runs:
+                        if run._element.xpath('.//a:blip'):
+                            # 段落中有图片，插入占位符
+                            text_parts.append(f'[[IMG_{image_counter}]]')
+                            image_counter += 1
+                            has_image = True
+                            break
+                    
+                    # 如果没有图片，添加文本
+                    if not has_image and paragraph.text.strip():
                         text_parts.append(paragraph.text)
                 
                 elif isinstance(element, CT_Tbl):
@@ -133,7 +146,7 @@ class DocumentProcessor:
                             text_parts.append(row_text)
             
             content = '\n'.join(text_parts)
-            logger.info(f"成功提取文本，长度: {len(content)}")
+            logger.info(f"成功提取文本，长度: {len(content)}, 图片数量: {image_counter - 1}")
             return content
         
         except Exception as e:
