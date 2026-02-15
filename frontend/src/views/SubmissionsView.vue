@@ -97,9 +97,9 @@
         @row-click="handleRowClick"
       >
         <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="email_from" label="采编" width="150">
+        <el-table-column prop="email_from" label="采编" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ row.email_from?.split('@')[0] || '-' }}
+            {{ row.email_from || '-' }}
           </template>
         </el-table-column>
         <el-table-column label="合作方式" width="100">
@@ -176,7 +176,7 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="340" fixed="right">
           <template #default="{ row }">
             <!-- 有草稿：查看草稿 + AI转换 -->
             <template v-if="row.drafts && row.drafts.length > 0">
@@ -210,6 +210,13 @@
               @click.stop="handleViewDetail(row)"
             >
               详情
+            </el-button>
+            <el-button
+              type="danger"
+              size="small"
+              @click.stop="handleDelete(row)"
+            >
+              删除
             </el-button>
           </template>
         </el-table-column>
@@ -308,7 +315,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, Picture, VideoCamera, Document } from '@element-plus/icons-vue'
-import { getSubmissions, triggerTransform } from '../api/submission'
+import { getSubmissions, triggerTransform, deleteSubmission } from '../api/submission'
 
 const router = useRouter()
 
@@ -449,7 +456,9 @@ const loadSubmissions = async () => {
     // 提取筛选选项
     extractFilterOptions(response.items)
   } catch (error) {
-    ElMessage.error('加载投稿列表失败: ' + (error.message || '未知错误'))
+    const detail = error.response?.data?.detail
+    const msg = typeof detail === 'string' ? detail : (detail?.msg || error.message || '未知错误')
+    ElMessage.error('加载投稿列表失败: ' + msg)
   } finally {
     loading.value = false
   }
@@ -523,6 +532,29 @@ const handleTransform = async (row) => {
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('启动转换失败: ' + (error.message || '未知错误'))
+    }
+  }
+}
+
+// 删除投稿
+const handleDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除投稿「${(row.email_subject || '无标题').slice(0, 30)}${(row.email_subject && row.email_subject.length > 30) ? '…' : ''}」吗？删除后无法恢复。`,
+      '确认删除',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    await deleteSubmission(row.id)
+    ElMessage.success('删除成功')
+    loadSubmissions()
+  } catch (error) {
+    if (error !== 'cancel') {
+      const msg = error.response?.data?.detail || error.message || '未知错误'
+      ElMessage.error('删除失败: ' + msg)
     }
   }
 }

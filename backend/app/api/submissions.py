@@ -34,64 +34,86 @@ async def list_submissions(
     支持分页、状态筛选和关键词搜索
     """
     from sqlalchemy.orm import selectinload
-    from app.models.draft import Draft
-    
-    # 构建查询
-    query = select(Submission)
-    
-    # 状态筛选
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # 构建公共 where 条件（用于 count 与分页查询）
+    base = select(Submission)
+
     if status:
-        query = query.where(Submission.status == status)
-    
-    # 采编筛选
+        base = base.where(Submission.status == status)
     if editor:
-        query = query.where(Submission.email_from.like(f"{editor}%"))
-    
-    # 合作方式筛选
+        base = base.where(Submission.email_from.like(f"{editor}%"))
     if cooperation:
-        query = query.where(Submission.cooperation_type == cooperation)
-    
-    # 媒体类型筛选
+        base = base.where(Submission.cooperation_type == cooperation)
     if media:
-        query = query.where(Submission.media_type == media)
-    
-    # 来稿单位筛选
+        base = base.where(Submission.media_type == media)
     if unit:
-        query = query.where(Submission.source_unit == unit)
-    
-    # 关键词搜索
+        base = base.where(Submission.source_unit == unit)
     if search:
         search_pattern = f"%{search}%"
-        query = query.where(
+        base = base.where(
             or_(
                 Submission.email_subject.ilike(search_pattern),
                 Submission.email_from.ilike(search_pattern),
-                Submission.original_content.ilike(search_pattern)
+                Submission.original_content.ilike(search_pattern),
             )
         )
-    
-    # 获取总数
-    count_query = select(func.count()).select_from(query.subquery())
-    result = await db.execute(count_query)
-    total = result.scalar_one()
-    
-    # 分页查询
-    query = query.order_by(Submission.created_at.desc())
-    query = query.offset((page - 1) * size).limit(size)
-    query = query.options(
-        selectinload(Submission.images),
-        selectinload(Submission.drafts)
+
+    # 总数：直接 count(Submission.id)，避免 subquery
+    count_stmt = select(func.count(Submission.id)).select_from(Submission)
+    if status:
+        count_stmt = count_stmt.where(Submission.status == status)
+    if editor:
+        count_stmt = count_stmt.where(Submission.email_from.like(f"{editor}%"))
+    if cooperation:
+        count_stmt = count_stmt.where(Submission.cooperation_type == cooperation)
+    if media:
+        count_stmt = count_stmt.where(Submission.media_type == media)
+    if unit:
+        count_stmt = count_stmt.where(Submission.source_unit == unit)
+    if search:
+        search_pattern = f"%{search}%"
+        count_stmt = count_stmt.where(
+            or_(
+                Submission.email_subject.ilike(search_pattern),
+                Submission.email_from.ilike(search_pattern),
+                Submission.original_content.ilike(search_pattern),
+            )
+        )
+    try:
+        total = (await db.execute(count_stmt)).scalar_one()
+    except Exception as e:
+        logger.exception("list_submissions count failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"统计总数失败: {str(e)}")
+
+    # 分页查询（带 images、drafts）
+    query = (
+        base.order_by(Submission.created_at.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+        .options(
+            selectinload(Submission.images),
+            selectinload(Submission.drafts),
+        )
     )
-    
-    result = await db.execute(query)
-    submissions = result.scalars().all()
-    
-    return SubmissionListResponse(
-        items=submissions,
-        total=total,
-        page=page,
-        size=size
-    )
+    try:
+        result = await db.execute(query)
+        submissions = result.scalars().all()
+    except Exception as e:
+        logger.exception("list_submissions query failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"查询投稿列表失败: {str(e)}")
+
+    try:
+        return SubmissionListResponse(
+            items=submissions,
+            total=total,
+            page=page,
+            size=size,
+        )
+    except Exception as e:
+        logger.exception("list_submissions serialize failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"序列化投稿列表失败: {str(e)}")
 
 
 @router.get("/{submission_id}", response_model=SubmissionSchema)
@@ -111,6 +133,25 @@ async def get_submission(
         raise HTTPException(status_code=404, detail="投稿不存在")
     
     return submission
+
+
+@router.delete("/{submission_id}")
+async def delete_submission(
+    submission_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    删除投稿（同时删除关联的图片、草稿等）
+    """
+    query = select(Submission).where(Submission.id == submission_id)
+    result = await db.execute(query)
+    submission = result.scalar_one_or_none()
+    if not submission:
+        raise HTTPException(status_code=404, detail="投稿不存在")
+    await db.delete(submission)
+    await db.commit()
+    return {"message": "删除成功"}
 
 
 @router.post("/{submission_id}/transform")

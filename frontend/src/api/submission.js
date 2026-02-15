@@ -31,6 +31,17 @@ export function getSubmission(id) {
 }
 
 /**
+ * 删除投稿
+ * @param {number} id - 投稿ID
+ */
+export function deleteSubmission(id) {
+  return request({
+    url: `/submissions/${id}`,
+    method: 'delete'
+  })
+}
+
+/**
  * 触发AI转换任务
  * @param {number} id - 投稿ID
  */

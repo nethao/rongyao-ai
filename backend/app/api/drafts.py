@@ -78,25 +78,24 @@ async def get_draft(
             media_map
         )
     
-    # 构建响应
+    # 构建响应（避免 None 导致 Pydantic 校验失败）
     draft_dict = {
         "id": draft.id,
         "submission_id": draft.submission_id,
-        "current_content": current_content,  # 已替换占位符的 HTML，或旧数据原文
-        "media_map": media_map,  # 占位符映射（含恢复出的，保存时需用）
-        "current_version": draft.current_version,
-        "status": draft.status,
+        "current_content": current_content or "",
+        "media_map": media_map,
+        "current_version": draft.current_version if draft.current_version is not None else 1,
+        "status": draft.status or "draft",
         "published_at": draft.published_at,
         "published_to_site_id": draft.published_to_site_id,
         "wordpress_post_id": draft.wordpress_post_id,
         "created_at": draft.created_at,
         "updated_at": draft.updated_at,
-        "original_content": original_content_display,  # Word文档显示带图片的HTML
+        "original_content": original_content_display if original_content_display is not None else "",
         "original_html": draft.submission.original_html,
         "email_subject": draft.submission.email_subject,
-        "content_source": draft.submission.content_source
+        "content_source": draft.submission.content_source,
     }
-    
     return draft_dict
 
 

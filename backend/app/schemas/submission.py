@@ -23,14 +23,14 @@ class DraftSummarySchema(BaseModel):
     
     id: int
     status: str
-    current_version: int
+    current_version: Optional[int] = 1  # DB 可能为 NULL，兼容旧数据
 
 
 class SubmissionBase(BaseModel):
     """投稿基础模型"""
     email_subject: Optional[str] = None
     email_from: Optional[str] = None
-    original_content: str
+    original_content: Optional[str] = ""  # 列表/详情兼容 DB 空值
 
 
 class SubmissionCreate(SubmissionBase):
