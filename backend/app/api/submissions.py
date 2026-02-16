@@ -200,6 +200,8 @@ async def preview_content(
         # 生成预览HTML（将占位符替换为实际图片）
         preview_html = ContentProcessor.render_for_wordpress(content, media_map)
         
+        logger.info(f"预览完成 - Title: {title}, Image Count: {image_count}, Media Map: {media_map}")
+        
         return ContentPreviewResponse(
             title=title,
             content=content,
@@ -235,6 +237,13 @@ async def create_submission(
     submission_service = SubmissionService(db)
     
     try:
+        logger.info(f"=== 创建投稿 ===")
+        logger.info(f"Title: {body.title}")
+        logger.info(f"Source: {body.content_source}")
+        logger.info(f"Media Map Type: {type(body.media_map)}")
+        logger.info(f"Media Map: {body.media_map}")
+        logger.info(f"Content (first 200 chars): {body.content[:200] if body.content else None}")
+        
         # 创建投稿
         submission = await submission_service.create_submission(
             email_subject=body.title,

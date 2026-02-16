@@ -117,20 +117,38 @@ def transform_content_task(self, submission_id: int):
                     f"reference_date={reference_date}"
                 )
                 
-                # 使用占位符协议：从submission.images生成占位符
+                # 使用占位符协议：优先使用草稿已有的media_map，否则从submission.images生成
                 from app.utils.content_processor import ContentProcessor
                 
-                # 获取图片列表（按ID排序）
-                images = [
-                    {"oss_url": img.oss_url, "original_filename": img.original_filename}
-                    for img in sorted(submission.images, key=lambda x: x.id)
-                ]
-                
-                # 生成带占位符的Markdown和media_map
-                original_md, media_map = ContentProcessor.extract_images_from_content(
-                    submission.original_content,
-                    images
+                # 检查是否已有草稿（手动发布的情况）
+                existing_draft = await db.execute(
+                    select(Draft).where(Draft.submission_id == submission_id)
                 )
+                existing_draft = existing_draft.scalar_one_or_none()
+                
+                if existing_draft and existing_draft.media_map:
+                    # 使用已有的media_map（手动发布场景）
+                    media_map = existing_draft.media_map
+                    original_md = submission.original_content
+                    logger.info(
+                        f"使用已有草稿的media_map: draft_id={existing_draft.id}, "
+                        f"图片数量={len(media_map)}"
+                    )
+                else:
+                    # 从submission.images生成（邮件投稿场景）
+                    images = [
+                        {"oss_url": img.oss_url, "original_filename": img.original_filename}
+                        for img in sorted(submission.images, key=lambda x: x.id)
+                    ]
+                    
+                    # 生成带占位符的Markdown和media_map
+                    original_md, media_map = ContentProcessor.extract_images_from_content(
+                        submission.original_content,
+                        images
+                    )
+                    logger.info(
+                        f"从submission.images生成media_map: 图片数量={len(images)}"
+                    )
                 
                 logger.info(
                     f"原文处理: 总长度={len(submission.original_content)}, "
