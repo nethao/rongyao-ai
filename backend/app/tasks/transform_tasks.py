@@ -131,9 +131,10 @@ def transform_content_task(self, submission_id: int):
                     # 使用已有的media_map（手动发布场景）
                     media_map = existing_draft.media_map
                     original_md = submission.original_content
+                    images_count = len(media_map)
                     logger.info(
                         f"使用已有草稿的media_map: draft_id={existing_draft.id}, "
-                        f"图片数量={len(media_map)}"
+                        f"图片数量={images_count}"
                     )
                 else:
                     # 从submission.images生成（邮件投稿场景）
@@ -141,6 +142,7 @@ def transform_content_task(self, submission_id: int):
                         {"oss_url": img.oss_url, "original_filename": img.original_filename}
                         for img in sorted(submission.images, key=lambda x: x.id)
                     ]
+                    images_count = len(images)
                     
                     # 生成带占位符的Markdown和media_map
                     original_md, media_map = ContentProcessor.extract_images_from_content(
@@ -148,12 +150,12 @@ def transform_content_task(self, submission_id: int):
                         images
                     )
                     logger.info(
-                        f"从submission.images生成media_map: 图片数量={len(images)}"
+                        f"从submission.images生成media_map: 图片数量={images_count}"
                     )
                 
                 logger.info(
                     f"原文处理: 总长度={len(submission.original_content)}, "
-                    f"带占位符={len(original_md)}, 图片={len(images)}"
+                    f"带占位符={len(original_md)}, 图片={images_count}"
                 )
                 
                 # 调用LLM进行转换（AI只看到占位符，不看到URL）
