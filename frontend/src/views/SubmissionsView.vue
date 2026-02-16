@@ -84,7 +84,47 @@
             <el-icon><Refresh /></el-icon>
             刷新
           </el-button>
+          <el-button
+            v-if="isAdmin"
+            type="success"
+            :loading="fetchingEmails"
+            @click="handleFetchEmails"
+          >
+            <el-icon><Message /></el-icon>
+            获取投稿
+          </el-button>
+          <el-button type="warning" @click="openManualCreateDialog">
+            <el-icon><Edit /></el-icon>
+            手动发布
+          </el-button>
         </div>
+      </div>
+      <!-- 邮件抓取进度 -->
+      <div v-if="emailFetchStatus" class="email-fetch-status" style="margin-top: 16px;">
+        <el-alert
+          :type="emailFetchStatus.status === 'success' ? 'success' : emailFetchStatus.status === 'failed' ? 'error' : 'info'"
+          :closable="emailFetchStatus.status !== 'started'"
+          @close="emailFetchStatus = null"
+        >
+          <template #title>
+            <span style="font-weight: 600;">邮件抓取任务</span>
+            <el-tag
+              :type="emailFetchStatus.status === 'success' ? 'success' : emailFetchStatus.status === 'failed' ? 'danger' : 'warning'"
+              size="small"
+              style="margin-left: 8px;"
+            >
+              {{ emailFetchStatus.status === 'started' ? '进行中' : emailFetchStatus.status === 'success' ? '已完成' : '失败' }}
+            </el-tag>
+          </template>
+          <div style="margin-top: 8px;">
+            <div>{{ emailFetchStatus.message }}</div>
+            <div v-if="emailFetchStatus.logs && emailFetchStatus.logs.length > 0" style="margin-top: 8px; font-size: 12px; color: #909399;">
+              <div v-for="(log, idx) in emailFetchStatus.logs" :key="idx" style="margin-top: 4px;">
+                {{ log.message }} ({{ formatTime(log.created_at) }})
+              </div>
+            </div>
+          </div>
+        </el-alert>
       </div>
     </el-card>
 
@@ -307,15 +347,158 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 手动创建投稿对话框 -->
+    <el-dialog
+      v-model="manualCreateDialogVisible"
+      title="手动发布稿件"
+      width="900px"
+      :close-on-click-modal="false"
+      @closed="resetManualCreateForm"
+    >
+      <!-- 第一步：选择类型并获取内容 -->
+      <div v-if="manualCreateStep === 1">
+        <el-form ref="previewFormRef" :model="manualCreateForm" :rules="previewRules" label-width="120px">
+          <el-form-item label="文章类型" prop="article_type">
+            <el-radio-group v-model="manualCreateForm.article_type" @change="handleArticleTypeChange">
+              <el-radio value="weixin">公众号</el-radio>
+              <el-radio value="meipian">美篇</el-radio>
+              <el-radio value="word">Word文档</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          
+          <!-- 公众号和美篇：链接输入 -->
+          <el-form-item 
+            v-if="manualCreateForm.article_type === 'weixin' || manualCreateForm.article_type === 'meipian'"
+            label="文章链接" 
+            prop="article_url"
+          >
+            <el-input 
+              v-model="manualCreateForm.article_url" 
+              :placeholder="manualCreateForm.article_type === 'weixin' ? '请输入公众号文章链接' : '请输入美篇文章链接'"
+              clearable
+            />
+          </el-form-item>
+          
+          <!-- Word文档：文件上传 -->
+          <el-form-item 
+            v-if="manualCreateForm.article_type === 'word'"
+            label="Word文档" 
+            prop="word_file"
+          >
+            <el-upload
+              ref="wordUploadRef"
+              :auto-upload="false"
+              :limit="1"
+              accept=".doc,.docx"
+              :on-change="handleWordFileChange"
+              :on-remove="handleWordFileRemove"
+              :file-list="wordFileList"
+            >
+              <el-button type="primary">选择文件</el-button>
+              <template #tip>
+                <div class="el-upload__tip">支持 .doc 和 .docx 格式</div>
+              </template>
+            </el-upload>
+          </el-form-item>
+        </el-form>
+      </div>
+      
+      <!-- 第二步：显示解析结果并填写信息 -->
+      <div v-else-if="manualCreateStep === 2">
+        <el-alert
+          type="success"
+          :closable="false"
+          style="margin-bottom: 20px;"
+        >
+          <template #title>
+            内容解析成功！请完善以下信息后创建投稿
+          </template>
+        </el-alert>
+        
+        <el-form ref="manualCreateFormRef" :model="manualCreateForm" :rules="manualCreateRules" label-width="120px">
+          <el-form-item label="标题" prop="email_subject">
+            <el-input 
+              v-model="manualCreateForm.email_subject" 
+              placeholder="标题（已自动提取，可修改）" 
+            />
+          </el-form-item>
+          
+          <!-- 内容预览 -->
+          <el-form-item label="内容预览">
+            <div class="manual-create-editor-wrapper" v-html="manualCreateForm.preview_html"></div>
+            <div v-if="manualCreateForm.image_count > 0" style="margin-top: 8px; color: #909399; font-size: 12px;">
+              检测到 {{ manualCreateForm.image_count }} 张图片（已上传）
+            </div>
+          </el-form-item>
+          
+          <el-form-item label="采编" prop="email_from">
+            <el-input v-model="manualCreateForm.email_from" placeholder="请输入采编名称或邮箱" />
+          </el-form-item>
+          
+          <el-form-item label="合作方式" prop="cooperation_type">
+            <el-select v-model="manualCreateForm.cooperation_type" placeholder="请选择合作方式" clearable style="width: 100%">
+              <el-option label="投稿" value="free" />
+              <el-option label="合作" value="partner" />
+            </el-select>
+          </el-form-item>
+          
+          <el-form-item label="发布媒体" prop="media_type">
+            <el-select v-model="manualCreateForm.media_type" placeholder="请选择发布媒体" clearable style="width: 100%">
+              <el-option label="荣耀网" value="rongyao" />
+              <el-option label="时代网" value="shidai" />
+              <el-option label="争先网" value="zhengxian" />
+              <el-option label="政企网" value="zhengqi" />
+              <el-option label="今日头条" value="toutiao" />
+            </el-select>
+          </el-form-item>
+          
+          <el-form-item label="来稿单位" prop="source_unit">
+            <el-input v-model="manualCreateForm.source_unit" placeholder="请输入来稿单位" />
+          </el-form-item>
+        </el-form>
+      </div>
+      
+      <template #footer>
+        <div v-if="manualCreateStep === 1">
+          <el-button @click="manualCreateDialogVisible = false">取消</el-button>
+          <el-button 
+            type="primary" 
+            :loading="manualCreatePreviewing" 
+            @click="handlePreviewContent"
+          >
+            <span v-if="!manualCreatePreviewing">
+              {{ manualCreateForm.article_type === 'word' ? '解析文档' : '获取内容' }}
+            </span>
+            <span v-else>
+              {{ manualCreateForm.article_type === 'word' ? '解析中，请稍候...' : '获取中，正在下载图片...' }}
+            </span>
+          </el-button>
+        </div>
+        <div v-else-if="manualCreateStep === 2">
+          <el-button @click="manualCreateStep = 1">上一步</el-button>
+          <el-button @click="manualCreateDialogVisible = false">取消</el-button>
+          <el-button 
+            type="primary" 
+            :loading="manualCreateSubmitting" 
+            @click="submitManualCreate"
+          >
+            创建投稿
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, Picture, VideoCamera, Document } from '@element-plus/icons-vue'
-import { getSubmissions, triggerTransform, deleteSubmission } from '../api/submission'
+import { Search, Refresh, Picture, VideoCamera, Document, Message, Edit } from '@element-plus/icons-vue'
+import { getSubmissions, triggerTransform, deleteSubmission, createSubmission, previewContent } from '../api/submission'
+import TiptapEditor from '../components/TiptapEditor.vue'
+import { triggerFetchEmails, getFetchEmailsStatus } from '../api/monitoring'
 
 const router = useRouter()
 
@@ -339,6 +522,254 @@ const unitList = ref([])
 // 详情对话框
 const detailDialogVisible = ref(false)
 const currentSubmission = ref(null)
+
+// 邮件抓取
+const fetchingEmails = ref(false)
+const emailFetchStatus = ref(null)
+let emailFetchStatusTimer = null
+
+// 管理员标识
+const isAdmin = computed(() => {
+  const user = JSON.parse(localStorage.getItem('user_info') || '{}')
+  return user.role === 'admin'
+})
+
+// 手动创建投稿
+const manualCreateDialogVisible = ref(false)
+const manualCreateStep = ref(1) // 1: 预览步骤, 2: 填写信息步骤
+const manualCreatePreviewing = ref(false)
+const manualCreateSubmitting = ref(false)
+const previewFormRef = ref(null)
+const manualCreateFormRef = ref(null)
+const wordUploadRef = ref(null)
+const wordFileList = ref([])
+const manualCreateForm = ref({
+  article_type: 'weixin', // weixin, meipian, word
+  article_url: '',
+  word_file: null,
+  email_subject: '',
+  original_content: '',
+  preview_html: '',
+  original_html: null,
+  content_source: '',
+  image_count: 0,
+  media_map: null,
+  email_from: '',
+  cooperation_type: '',
+  media_type: '',
+  source_unit: ''
+})
+const previewRules = {
+  article_type: [{ required: true, message: '请选择文章类型', trigger: 'change' }],
+  article_url: [
+    { 
+      validator: (rule, value, callback) => {
+        if (manualCreateForm.value.article_type === 'weixin' || manualCreateForm.value.article_type === 'meipian') {
+          if (!value || !value.trim()) {
+            callback(new Error('请输入文章链接'))
+          } else {
+            callback()
+          }
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
+  ],
+  word_file: [
+    {
+      validator: (rule, value, callback) => {
+        if (manualCreateForm.value.article_type === 'word') {
+          if (!manualCreateForm.value.word_file) {
+            callback(new Error('请上传Word文档'))
+          } else {
+            callback()
+          }
+        } else {
+          callback()
+        }
+      },
+      trigger: 'change'
+    }
+  ]
+}
+
+const manualCreateRules = {
+  email_subject: [{ required: true, message: '请输入标题', trigger: 'blur' }],
+  email_from: [{ required: true, message: '请输入采编', trigger: 'blur' }],
+  cooperation_type: [{ required: true, message: '请选择合作方式', trigger: 'change' }],
+  media_type: [{ required: true, message: '请选择发布媒体', trigger: 'change' }],
+  source_unit: [{ required: true, message: '请输入来稿单位', trigger: 'blur' }]
+}
+
+function openManualCreateDialog() {
+  const user = JSON.parse(localStorage.getItem('user_info') || '{}')
+  manualCreateStep.value = 1
+  manualCreateForm.value = {
+    article_type: 'weixin',
+    article_url: '',
+    word_file: null,
+    email_subject: '',
+    original_content: '',
+    original_html: null,
+    content_source: '',
+    image_count: 0,
+    email_from: user.username || '',
+    cooperation_type: '',
+    media_type: '',
+    source_unit: ''
+  }
+  wordFileList.value = []
+  manualCreateDialogVisible.value = true
+}
+
+function resetManualCreateForm() {
+  manualCreateStep.value = 1
+  manualCreateForm.value = {
+    article_type: 'weixin',
+    article_url: '',
+    word_file: null,
+    email_subject: '',
+    original_content: '',
+    original_html: null,
+    content_source: '',
+    image_count: 0,
+    email_from: '',
+    cooperation_type: '',
+    media_type: '',
+    source_unit: ''
+  }
+  wordFileList.value = []
+  if (wordUploadRef.value) {
+    wordUploadRef.value.clearFiles()
+  }
+}
+
+function handleArticleTypeChange() {
+  // 切换类型时清空相关字段
+  manualCreateForm.value.article_url = ''
+  manualCreateForm.value.word_file = null
+  manualCreateForm.value.email_subject = ''
+  manualCreateForm.value.original_content = ''
+  manualCreateForm.value.preview_html = ''
+  manualCreateForm.value.original_html = null
+  manualCreateForm.value.content_source = ''
+  manualCreateForm.value.image_count = 0
+  manualCreateForm.value.media_map = null
+  wordFileList.value = []
+  if (wordUploadRef.value) {
+    wordUploadRef.value.clearFiles()
+  }
+  manualCreateStep.value = 1
+}
+
+function handleWordFileChange(file) {
+  manualCreateForm.value.word_file = file.raw
+  wordFileList.value = [file]
+}
+
+function handleWordFileRemove() {
+  manualCreateForm.value.word_file = null
+  wordFileList.value = []
+}
+
+const handlePreviewContent = async () => {
+  if (!previewFormRef.value) return
+  await previewFormRef.value.validate(async (valid) => {
+    if (!valid) return
+    
+    manualCreatePreviewing.value = true
+    try {
+      const formData = new FormData()
+      formData.append('article_type', manualCreateForm.value.article_type)
+      
+      if (manualCreateForm.value.article_type === 'weixin' || manualCreateForm.value.article_type === 'meipian') {
+        if (!manualCreateForm.value.article_url) {
+          ElMessage.warning('请输入文章链接')
+          manualCreatePreviewing.value = false
+          return
+        }
+        formData.append('article_url', manualCreateForm.value.article_url)
+      } else if (manualCreateForm.value.article_type === 'word') {
+        if (!manualCreateForm.value.word_file) {
+          ElMessage.warning('请上传Word文档')
+          manualCreatePreviewing.value = false
+          return
+        }
+        formData.append('word_file', manualCreateForm.value.word_file)
+      }
+      
+      const response = await previewContent(formData)
+      
+      // 填充解析结果
+      manualCreateForm.value.email_subject = response.title
+      manualCreateForm.value.original_content = response.content
+      manualCreateForm.value.preview_html = response.preview_html
+      manualCreateForm.value.original_html = response.original_html
+      manualCreateForm.value.content_source = response.content_source
+      manualCreateForm.value.image_count = response.image_count
+      manualCreateForm.value.media_map = response.media_map
+      
+      // 进入第二步
+      manualCreateStep.value = 2
+      if (response.image_count > 0) {
+        ElMessage.success(`内容解析成功，已上传 ${response.image_count} 张图片`)
+      } else {
+        ElMessage.success('内容解析成功')
+      }
+    } catch (error) {
+      const msg = error.response?.data?.detail || error.message || '未知错误'
+      if (msg.includes('链接')) {
+        ElMessage.error('链接无效或无法访问，请检查链接是否正确')
+      } else if (msg.includes('格式')) {
+        ElMessage.error('文件格式不支持，请上传 .doc 或 .docx 文件')
+      } else if (msg.includes('网络') || msg.includes('timeout')) {
+        ElMessage.error('网络超时，请稍后重试')
+      } else {
+        ElMessage.error('解析失败: ' + msg)
+      }
+    } finally {
+      manualCreatePreviewing.value = false
+    }
+  })
+}
+
+const submitManualCreate = async () => {
+  if (!manualCreateFormRef.value) return
+  await manualCreateFormRef.value.validate(async (valid) => {
+    if (!valid) return
+    
+    manualCreateSubmitting.value = true
+    try {
+      const response = await createSubmission({
+        title: manualCreateForm.value.email_subject,
+        content: manualCreateForm.value.original_content,
+        original_html: manualCreateForm.value.original_html,
+        content_source: manualCreateForm.value.content_source,
+        media_map: manualCreateForm.value.media_map,
+        email_from: manualCreateForm.value.email_from,
+        cooperation_type: manualCreateForm.value.cooperation_type,
+        media_type: manualCreateForm.value.media_type,
+        source_unit: manualCreateForm.value.source_unit
+      })
+      ElMessage.success('创建成功')
+      manualCreateDialogVisible.value = false
+      // 跳转到审核页面（使用第一个草稿）
+      if (response.drafts && response.drafts.length > 0) {
+        router.push({ name: 'audit', params: { draftId: response.drafts[0].id } })
+      } else {
+        // 如果没有草稿，刷新列表
+        loadSubmissions()
+      }
+    } catch (error) {
+      const msg = error.response?.data?.detail || error.message || '未知错误'
+      ElMessage.error('创建失败: ' + msg)
+    } finally {
+      manualCreateSubmitting.value = false
+    }
+  })
+}
 
 // 媒体名称映射
 const getMediaName = (mediaType) => {
@@ -487,9 +918,13 @@ const handleSizeChange = (size) => {
   loadSubmissions()
 }
 
-// 行点击
+// 行点击：优先打开草稿，无草稿则打开详情
 const handleRowClick = (row) => {
-  handleViewDetail(row)
+  if (row.drafts && row.drafts.length > 0) {
+    handleViewDraft(row)
+  } else {
+    handleViewDetail(row)
+  }
 }
 
 // 查看详情
@@ -558,6 +993,72 @@ const handleDelete = async (row) => {
     }
   }
 }
+
+// 刷新邮箱
+const handleFetchEmails = async () => {
+  if (fetchingEmails.value) return
+  fetchingEmails.value = true
+  emailFetchStatus.value = null
+  
+  try {
+    await triggerFetchEmails()
+    ElMessage.success('邮件抓取任务已启动')
+    // 开始轮询状态
+    startPollingEmailStatus()
+  } catch (error) {
+    const msg = error.response?.data?.detail || error.message || '未知错误'
+    ElMessage.error('启动邮件抓取失败: ' + msg)
+    fetchingEmails.value = false
+  }
+}
+
+// 轮询邮件抓取状态
+const startPollingEmailStatus = async () => {
+  const poll = async () => {
+    try {
+      const status = await getFetchEmailsStatus()
+      emailFetchStatus.value = status
+      
+      // 如果任务完成或失败，停止轮询
+      if (status.status === 'success' || status.status === 'failed') {
+        fetchingEmails.value = false
+        if (emailFetchStatusTimer) {
+          clearInterval(emailFetchStatusTimer)
+          emailFetchStatusTimer = null
+        }
+        // 任务完成后刷新列表
+        if (status.status === 'success') {
+          setTimeout(() => {
+            loadSubmissions()
+          }, 1000)
+        }
+      }
+    } catch (error) {
+      console.error('获取邮件抓取状态失败:', error)
+    }
+  }
+  
+  // 立即查询一次
+  await poll()
+  
+  // 每2秒轮询一次
+  emailFetchStatusTimer = setInterval(poll, 2000)
+}
+
+// 格式化时间
+const formatTime = (timeStr) => {
+  if (!timeStr) return ''
+  const d = new Date(timeStr)
+  return d.toLocaleString('zh-CN', { hour12: false })
+}
+
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  if (emailFetchStatusTimer) {
+    clearInterval(emailFetchStatusTimer)
+    emailFetchStatusTimer = null
+  }
+})
 
 // 状态类型
 const getStatusType = (status) => {
@@ -734,5 +1235,39 @@ onMounted(() => {
   top: 0;
   right: 0;
   transform: translate(50%, -50%);
+}
+
+/* 手动创建投稿编辑器容器 */
+.manual-create-editor-wrapper {
+  width: 100%;
+  max-height: 500px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  overflow-y: auto;
+  background: #fff;
+  padding: 16px;
+}
+
+.manual-create-editor-wrapper img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 10px 0;
+}
+
+.manual-create-editor-wrapper p {
+  margin: 8px 0;
+  line-height: 1.6;
+}
+
+.manual-create-editor-wrapper :deep(.tiptap-editor-root) {
+  height: 100%;
+  border: none;
+  border-radius: 0;
+}
+
+.manual-create-editor-wrapper :deep(.tiptap-content-wrap) {
+  height: calc(100% - 40px);
+  overflow-y: auto;
 }
 </style>

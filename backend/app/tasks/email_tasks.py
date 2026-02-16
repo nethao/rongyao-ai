@@ -34,6 +34,17 @@ def fetch_emails_task():
     async def _fetch():
         logger.info("开始执行邮件抓取任务")
         
+        # 记录任务开始
+        async with AsyncSessionLocal() as db:
+            from app.services.submission_service import SubmissionService
+            service = SubmissionService(db)
+            await service.log_task(
+                task_type="fetch_email",
+                task_id=None,
+                status="started",
+                message="开始抓取邮箱未读邮件"
+            )
+        
         try:
             # 初始化服务
             fetcher = IMAPFetcher()
@@ -45,17 +56,41 @@ def fetch_emails_task():
             logger.info(f"获取到 {len(emails)} 封未读邮件")
             
             # 处理每封邮件
+            processed_count = 0
             for email_data in emails:
                 try:
                     await process_email(email_data, doc_processor, oss_service)
+                    processed_count += 1
                 except Exception as e:
                     logger.error(f"处理邮件失败: {str(e)}")
                     continue
             
+            # 记录任务成功
+            async with AsyncSessionLocal() as db:
+                from app.services.submission_service import SubmissionService
+                service = SubmissionService(db)
+                await service.log_task(
+                    task_type="fetch_email",
+                    task_id=None,
+                    status="success",
+                    message=f"邮件抓取完成，共处理 {processed_count} 封邮件"
+                )
+            
             logger.info("邮件抓取任务完成")
-            return {"success": True, "processed": len(emails)}
+            return {"success": True, "processed": processed_count}
         
         except Exception as e:
+            # 记录任务失败
+            async with AsyncSessionLocal() as db:
+                from app.services.submission_service import SubmissionService
+                service = SubmissionService(db)
+                await service.log_task(
+                    task_type="fetch_email",
+                    task_id=None,
+                    status="failed",
+                    message=f"邮件抓取失败: {str(e)}"
+                )
+            
             logger.error(f"邮件抓取任务失败: {str(e)}")
             return {"success": False, "error": str(e)}
     

@@ -38,7 +38,7 @@ services:
     build:
       context: .
       dockerfile: docker/backend/Dockerfile
-    command: celery -A app.tasks worker --loglevel=info
+    command: celery -A app.tasks:celery_app worker --loglevel=info
     volumes:
       - ./backend:/app
     env_file:
@@ -46,10 +46,13 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:password@db/glory_audit
       - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       - db
       - redis
       - backend
+    restart: unless-stopped
 
   frontend:
     build:

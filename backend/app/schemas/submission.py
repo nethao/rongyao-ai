@@ -38,6 +38,17 @@ class SubmissionCreate(SubmissionBase):
     pass
 
 
+class ManualSubmissionCreate(BaseModel):
+    """手动创建投稿模型"""
+    email_subject: str  # 标题（必填）
+    original_content: str  # 内容（必填）
+    email_from: Optional[str] = None  # 采编（可选，默认当前用户）
+    cooperation_type: Optional[str] = None  # 合作方式：free/partner
+    media_type: Optional[str] = None  # 媒体类型
+    source_unit: Optional[str] = None  # 来稿单位
+    content_source: Optional[str] = "text"  # 内容来源，默认 text
+
+
 class SubmissionSchema(SubmissionBase):
     """投稿响应模型"""
     model_config = ConfigDict(from_attributes=True)
@@ -68,3 +79,27 @@ class SubmissionListResponse(BaseModel):
     total: int
     page: int
     size: int
+
+
+class ContentPreviewResponse(BaseModel):
+    """内容预览响应模型（用于手动发布第一步）"""
+    title: str  # 提取的标题
+    content: str  # 提取的内容（Markdown格式，带占位符）
+    preview_html: str  # 预览HTML（图片已上传OSS）
+    original_html: Optional[str] = None  # 原始HTML（公众号/美篇）
+    content_source: str  # 内容来源：weixin, meipian, doc, docx
+    image_count: int = 0  # 图片数量
+    media_map: Optional[dict] = None  # 占位符到OSS URL的映射
+
+
+class ManualSubmissionCreateFromPreview(BaseModel):
+    """从预览创建投稿模型"""
+    title: str  # 标题
+    content: str  # 内容（带占位符）
+    original_html: Optional[str] = None  # 原始HTML
+    content_source: str  # 内容来源
+    media_map: Optional[dict] = None  # 占位符到OSS URL的映射
+    email_from: str  # 采编
+    cooperation_type: str  # 合作方式
+    media_type: str  # 发布媒体
+    source_unit: str  # 来稿单位

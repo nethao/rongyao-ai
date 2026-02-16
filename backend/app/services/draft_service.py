@@ -164,6 +164,7 @@ class DraftService:
                 existing_draft.id,
                 transformed_content=transformed_content,
                 created_by=created_by,
+                original_content_md=original_content_md,
                 ai_content_md=ai_content_md,
                 media_map=media_map
             )
@@ -236,6 +237,7 @@ class DraftService:
         content: str = None,
         created_by: Optional[int] = None,
         transformed_content: str = None,
+        original_content_md: str = None,
         ai_content_md: str = None,
         media_map: dict = None
     ) -> Draft:
@@ -264,12 +266,15 @@ class DraftService:
             raise ValueError(error_msg)
         
         # 使用新方式或旧方式
-        logger.info(f"update_draft收到: ai_content_md长度={len(ai_content_md) if ai_content_md else 0}, media_map={media_map}")
+        logger.info(f"update_draft收到: original_content_md长度={len(original_content_md) if original_content_md else 0}, ai_content_md长度={len(ai_content_md) if ai_content_md else 0}, media_map={media_map}")
         if ai_content_md and media_map is not None:
             # 新方式：直接存储Markdown，不做格式化
             content_md = ai_content_md
             final_media_map = media_map
             formatted_content = ai_content_md  # 直接存储Markdown
+            # 如果提供了original_content_md，也更新它
+            if original_content_md:
+                draft.original_content_md = original_content_md
             logger.info(f"使用新方式，final_media_map={final_media_map}")
         else:
             # 旧方式：使用content或transformed_content
@@ -288,8 +293,8 @@ class DraftService:
             final_media_map = draft.media_map or {}
             formatted_content = actual_content
         
-        # 更新草稿当前内容和版本号
-        new_version_number = draft.current_version + 1
+        # 更新草稿当前内容和版本号（兼容 current_version 为 NULL 的旧数据）
+        new_version_number = (draft.current_version or 0) + 1
         draft.ai_content_md = content_md
         draft.media_map = final_media_map
         draft.current_content = formatted_content

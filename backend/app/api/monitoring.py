@@ -150,20 +150,61 @@ async def trigger_fetch_emails(
     current_user: User = Depends(require_admin)
 ):
     """
-    手动触发邮件抓取（仅管理员）
+    手动触发邮件抓取（仅管理员）- 异步执行
     """
     from app.tasks.email_tasks import fetch_emails_task
     
     try:
-        # 触发邮件抓取任务
-        result = fetch_emails_task()
+        # 异步触发邮件抓取任务
+        task = fetch_emails_task.delay()
         return {
             "success": True,
-            "message": "邮件抓取任务已执行",
-            "result": result
+            "message": "邮件抓取任务已启动",
+            "task_id": task.id
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"邮件抓取失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"启动邮件抓取失败: {str(e)}")
+
+
+@router.get("/fetch-emails/status")
+async def get_fetch_emails_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    获取最新的邮件抓取任务状态（仅管理员）
+    """
+    # 查询最新的 fetch_email 任务日志
+    query = (
+        select(TaskLog)
+        .where(TaskLog.task_type == "fetch_email")
+        .order_by(desc(TaskLog.created_at))
+        .limit(10)
+    )
+    result = await db.execute(query)
+    logs = result.scalars().all()
+    
+    if not logs:
+        return {
+            "status": "idle",
+            "message": "暂无邮件抓取任务",
+            "logs": []
+        }
+    
+    latest = logs[0]
+    return {
+        "status": latest.status,  # 'started', 'success', 'failed'
+        "message": latest.message,
+        "created_at": latest.created_at.isoformat(),
+        "logs": [
+            {
+                "status": log.status,
+                "message": log.message,
+                "created_at": log.created_at.isoformat()
+            }
+            for log in logs[:5]  # 返回最近5条
+        ]
+    }
 
 
 @router.get("/health")

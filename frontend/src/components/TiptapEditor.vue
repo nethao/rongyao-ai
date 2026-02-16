@@ -25,8 +25,6 @@ import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import TextAlign from '@tiptap/extension-text-align'
-import Underline from '@tiptap/extension-underline'
-import Link from '@tiptap/extension-link'
 import { Video } from './VideoExtension.js'
 
 const props = defineProps({
@@ -42,13 +40,135 @@ const editor = useEditor({
   extensions: [
     StarterKit.configure({
       heading: { levels: [1, 2, 3, 4] },
+      link: {
+        openOnClick: false,
+      },
     }),
     Image.configure({ inline: false, allowBase64: true }),
     Video,
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
-    Underline,
-    Link.configure({ openOnClick: false }),
   ],
+  editorProps: {
+    transformPastedHTML(html) {
+      // 保留 Word 粘贴的格式和图片
+      if (!html) return html
+      
+      // 保留图片（包括 base64 和 URL）
+      // Tiptap Image 扩展会自动处理 <img> 标签，包括 base64 图片
+      
+      // 保留 Word 的列表格式（ol, ul, li）
+      // 保留标题（h1-h6）
+      // 保留基本格式标签（strong, em, u, s）
+      // 保留段落（p）
+      // 保留换行（br）
+      
+      // 清理 Word 特有的无用标签和样式，但保留内容结构
+      let cleaned = html
+      
+      // 移除 Word 的注释和元数据
+      cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '')
+      
+      // 移除完全空的段落，但保留有内容的
+      cleaned = cleaned.replace(/<p[^>]*>\s*(&nbsp;|\s)*<\/p>/gi, '')
+      
+      // 保留表格结构（如果有）
+      // 保留链接（a 标签）
+      
+      // 处理图片：移除 file:// 路径的图片（浏览器无法访问本地文件）
+      // 注意：如果 handlePaste 成功提取了图片数据，这里不会执行（因为图片已被替换）
+      cleaned = cleaned.replace(/<img[^>]*src=["']file:\/\/[^"']+["'][^>]*>/gi, (match) => {
+        // 可以在这里添加提示，但为了不影响粘贴，先静默移除
+        return ''
+      })
+      
+      // 确保图片标签完整（Word 可能生成不完整的 img）
+      cleaned = cleaned.replace(/<img([^>]*?)(?:\s*\/)?>/gi, (match, attrs) => {
+        // 如果图片没有 src，尝试从 data 属性获取
+        if (!attrs.includes('src=')) {
+          const dataMatch = attrs.match(/data:image\/[^;]+;base64,[^"'\s]+/i)
+          if (dataMatch) {
+            return `<img src="${dataMatch[0]}" ${attrs} />`
+          }
+        }
+        return match
+      })
+      
+      return cleaned
+    },
+    handlePaste(view, event, slice) {
+      const clipboardData = event.clipboardData
+      if (!clipboardData || !editor.value) return false
+      
+      const items = Array.from(clipboardData.items || [])
+      
+      // 只检查真正的图片二进制数据
+      const imageItems = items.filter(item => item.type.startsWith('image/'))
+      
+      // 只有在确实有图片二进制数据时才拦截处理
+      if (imageItems.length > 0) {
+        event.preventDefault()
+        
+        // 提取所有图片并转换为 base64
+        const imagePromises = imageItems.map((item, index) => {
+          return new Promise((resolve) => {
+            try {
+              const file = item.getAsFile()
+              if (file && file.size > 0) {
+                const reader = new FileReader()
+                reader.onload = (e) => {
+                  resolve({ index, base64: e.target.result })
+                }
+                reader.onerror = () => resolve(null)
+                reader.readAsDataURL(file)
+              } else {
+                resolve(null)
+              }
+            } catch (err) {
+              resolve(null)
+            }
+          })
+        })
+        
+        Promise.all(imagePromises).then(images => {
+          const validImages = images.filter(Boolean).sort((a, b) => (a.index || 0) - (b.index || 0))
+          const htmlData = clipboardData.getData('text/html')
+          
+          if (htmlData) {
+            // 有 HTML：替换 file:// 图片为 base64
+            let imageIndex = 0
+            let processedHtml = htmlData.replace(/<img([^>]*?)src=["']file:\/\/[^"']+["']([^>]*?)>/gi, (match, before, after) => {
+              if (imageIndex < validImages.length) {
+                const base64 = validImages[imageIndex].base64
+                imageIndex++
+                const cleanBefore = before.replace(/\s*contenteditable=["'][^"']*["']/gi, '')
+                const cleanAfter = after.replace(/\s*contenteditable=["'][^"']*["']/gi, '')
+                return `<img${cleanBefore}src="${base64}"${cleanAfter}>`
+              }
+              return ''
+            })
+            editor.value.chain().focus().insertContent(processedHtml).run()
+          } else {
+            // 没有 HTML，直接插入图片
+            validImages.forEach(img => {
+              editor.value.chain().focus().setImage({ src: img.base64 }).run()
+            })
+          }
+        }).catch(() => {
+          // 失败时回退：插入纯文本
+          const textData = clipboardData.getData('text/plain')
+          if (textData && editor.value) {
+            editor.value.chain().focus().insertContent(textData).run()
+          }
+        })
+        
+        return true
+      }
+      
+      // 没有图片二进制数据，让默认粘贴行为继续
+      // transformPastedHTML 会处理格式并移除 file:// 图片
+      return false
+    },
+  },
   onUpdate({ editor: ed }) {
     const html = ed.getHTML()
     emit('update:modelValue', html)

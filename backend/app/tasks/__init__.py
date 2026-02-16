@@ -45,3 +45,6 @@ celery_app.autodiscover_tasks(["app.tasks"])
 # 显式导入所有任务
 from app.tasks.email_tasks import fetch_emails_task  # noqa
 from app.tasks.transform_tasks import transform_content_task  # noqa
+
+# 供命令行 `celery -A app.tasks worker` 识别的入口（Celery 默认查找 app 或 celery）
+app = celery_app

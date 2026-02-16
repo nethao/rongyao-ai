@@ -10,8 +10,8 @@ if ! docker info > /dev/null 2>&1; then
     exit 1
 fi
 
-# 启动服务
-echo "📦 启动Docker容器..."
+# 启动服务（包含 backend、celery_worker、redis、db、frontend 等）
+echo "📦 启动Docker容器（含 Celery Worker，AI 改写依赖此服务）..."
 docker-compose up -d
 
 # 等待数据库启动
@@ -38,4 +38,7 @@ echo "   - 用户名: admin"
 echo "   - 密码: admin123"
 echo ""
 echo "📝 查看日志: docker-compose logs -f"
+echo "📝 查看 AI 任务 Worker 日志: docker-compose logs -f celery_worker"
 echo "🛑 停止服务: docker-compose down"
+echo ""
+echo "⚠️  若「AI 改写」无反应，请确认 celery_worker 已启动: docker-compose ps"

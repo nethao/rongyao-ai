@@ -300,7 +300,7 @@ import {
   VideoCamera
 } from '@element-plus/icons-vue'
 import { getDraft, updateDraft, getDraftVersions, restoreVersion, restoreAIVersion } from '../api/draft'
-import { triggerTransform } from '../api/submission'
+import { triggerTransform, getTransformStatus } from '../api/submission'
 import { markdownToHtml, htmlToMarkdown } from '../utils/markdown'
 import TiptapEditor from '../components/TiptapEditor.vue'
 
@@ -622,13 +622,27 @@ const handleAiTransform = async () => {
     console.log('步骤2: 开始轮询，初始内容长度:', prevContent?.length)
 
     let pollCount = 0
+    const applyDraftUpdate = async (res) => {
+      const hasPlaceholders = res.media_map && Object.keys(res.media_map).length > 0
+      const processedContent = hasPlaceholders ? res.current_content : markdownToHtml(res.current_content)
+      editableContent.value = res.current_content
+      editableHtml.value = processedContent
+      currentVersion.value = res.current_version
+      hasUnsavedChanges.value = false
+      tiptapRef.value?.setHTML?.(processedContent)
+      await loadVersions()
+      transforming.value = false
+      transformProgress.value = 100
+      setTimeout(() => {
+        transformProgress.value = 0
+        ElMessage.success('AI 改写已完成！图文排版已保留')
+      }, 500)
+    }
+
     const poll = async () => {
       pollCount++
       const elapsed = Date.now() - startTime
-      
-      console.log(`轮询 #${pollCount}, 已耗时: ${Math.floor(elapsed/1000)}秒`)
-      
-      // 模拟进度
+
       if (elapsed < 30000) {
         transformProgress.value = Math.min(30, Math.floor(elapsed / 1000))
       } else if (elapsed < 90000) {
@@ -636,51 +650,37 @@ const handleAiTransform = async () => {
       } else {
         transformProgress.value = Math.min(95, 70 + Math.floor((elapsed - 90000) / 3000))
       }
-      
+
       if (elapsed > POLL_TIMEOUT) {
-        console.error('❌ 超时！已等待:', Math.floor(elapsed/1000), '秒')
         transforming.value = false
         transformProgress.value = 0
         ElMessage.warning('等待超时，请手动刷新查看结果')
         return
       }
-      
+
       try {
-        console.log('步骤3: 获取草稿状态...')
-        const res = await getDraft(draftId.value)
-        console.log('草稿返回:', {
-          version: res.current_version,
-          contentLength: res.current_content?.length,
-          versionChanged: res.current_version !== prevVersion,
-          contentChanged: res.current_content !== prevContent
-        })
-        
-        if (res.current_version !== prevVersion || res.current_content !== prevContent) {
-          console.log('✅ 检测到内容变化！')
+        // 先查任务状态：若已失败则直接提示并停止
+        const statusRes = await getTransformStatus(submissionId.value)
+        if (statusRes.status === 'failed') {
           transforming.value = false
-          transformProgress.value = 100
-          
-          const hasPlaceholders = res.media_map && Object.keys(res.media_map).length > 0
-          const processedContent = hasPlaceholders ? res.current_content : markdownToHtml(res.current_content)
-          editableContent.value = res.current_content
-          editableHtml.value = processedContent
-          currentVersion.value = res.current_version
-          hasUnsavedChanges.value = false
-          
-          console.log('步骤4: 更新编辑器...')
-          tiptapRef.value?.setHTML?.(processedContent)
-          
-          console.log('步骤5: 加载版本历史...')
-          await loadVersions()
-          
-          setTimeout(() => {
-            transformProgress.value = 0
-            ElMessage.success('AI 改写已完成！图文排版已保留')
-            console.log('=== AI改写完成 ===')
-          }, 500)
+          transformProgress.value = 0
+          ElMessage.error('AI 改写失败：' + (statusRes.message || '未知错误'))
           return
-        } else {
-          console.log('内容未变化，继续等待...')
+        }
+        // 任务已成功：拉一次草稿并应用
+        if (statusRes.status === 'success') {
+          const res = await getDraft(draftId.value)
+          if (res.current_version !== prevVersion || res.current_content !== prevContent) {
+            await applyDraftUpdate(res)
+            return
+          }
+        }
+
+        // 未完成则继续查草稿是否已有更新
+        const res = await getDraft(draftId.value)
+        if (res.current_version !== prevVersion || res.current_content !== prevContent) {
+          await applyDraftUpdate(res)
+          return
         }
       } catch (error) {
         console.error('轮询出错:', error)
