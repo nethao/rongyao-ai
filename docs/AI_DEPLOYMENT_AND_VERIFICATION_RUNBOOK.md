@@ -273,3 +273,71 @@ Before final `GO`, AI must ask human:
 
 If any item is unconfirmed, return `NO_GO`.
 
+
+
+---
+
+## 12. 待配置项目（上线后添加）
+
+### Celery Beat定时任务（邮件自动抓取）
+
+**当前状态**：
+- ✅ 定时任务代码已配置（每5分钟抓取邮件）
+- ❌ Celery Beat服务未启动
+- ✅ 手动点击"获取投稿"按钮可以抓取
+
+**配置方法**：
+
+1. 在`docker-compose.yml`中添加celery_beat服务：
+
+```yaml
+  celery_beat:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    command: celery -A app.tasks:celery_app beat --loglevel=info
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+      - db
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/glory_audit
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    networks:
+      - app-network
+```
+
+2. 启动服务：
+```bash
+docker-compose up -d celery_beat
+```
+
+3. 验证定时任务：
+```bash
+docker-compose logs -f celery_beat
+```
+
+应该看到类似日志：
+```
+[INFO] beat: Starting...
+[INFO] Scheduler: Sending due task fetch-emails-every-5-minutes
+```
+
+**定时任务配置**：
+- 邮件抓取：每5分钟执行一次
+- 清理任务：每天凌晨2点执行
+
+**配置文件位置**：`backend/app/tasks/__init__.py`
+
+**验证步骤**：
+1. 确认celery_beat容器运行：`docker-compose ps | grep beat`
+2. 查看日志确认任务调度：`docker-compose logs celery_beat`
+3. 等待5分钟后检查是否有新投稿
+4. 查看celery_worker日志确认任务执行：`docker-compose logs celery_worker | grep fetch_emails`
+
+**注意事项**：
+- Celery Beat只需要一个实例运行
+- 确保Redis服务正常运行
+- 定时任务时间可在`backend/app/tasks/__init__.py`中调整
