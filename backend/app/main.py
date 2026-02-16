@@ -3,7 +3,7 @@ FastAPI应用主入口
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import config, auth, users, submissions, drafts, wordpress_sites, monitoring
+from app.api import config, auth, users, submissions, drafts, wordpress_sites, monitoring, analytics
 
 app = FastAPI(
     title="荣耀AI审核发布系统",
@@ -28,6 +28,7 @@ app.include_router(submissions.router, prefix="/api")
 app.include_router(drafts.router, prefix="/api")
 app.include_router(wordpress_sites.router, prefix="/api")
 app.include_router(monitoring.router, prefix="/api")
+app.include_router(analytics.router, prefix="/api")
 
 
 @app.get("/")

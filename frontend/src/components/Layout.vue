@@ -15,6 +15,10 @@
             <el-icon><Document /></el-icon>
             投稿列表
           </el-menu-item>
+          <el-menu-item index="/analytics">
+            <el-icon><DataAnalysis /></el-icon>
+            数据分析
+          </el-menu-item>
           <el-menu-item v-if="isAdmin" index="/users">
             <el-icon><UserFilled /></el-icon>
             用户管理
@@ -57,7 +61,8 @@ import {
   User,
   UserFilled,
   ArrowDown,
-  SwitchButton
+  SwitchButton,
+  DataAnalysis
 } from '@element-plus/icons-vue'
 import { getUser, isAdmin as checkIsAdmin, logout } from '../utils/auth'
 
