@@ -248,7 +248,7 @@
           <el-timeline-item
             v-for="item in publishHistory"
             :key="item.id"
-            :timestamp="new Date(item.created_at).toLocaleString('zh-CN')"
+            :timestamp="formatDateTime(item.created_at)"
             :type="item.status === 'success' ? 'success' : 'danger'"
             placement="top"
           >
@@ -894,9 +894,12 @@ const formatDate = (dateStr) => {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit'
+    second: '2-digit',
+    timeZone: 'Asia/Shanghai'
   })
 }
+
+const formatDateTime = formatDate
 
 // 页面离开前提示
 const handleBeforeUnload = (e) => {
