@@ -169,7 +169,7 @@ def transform_content_task(self, submission_id: int):
                     f"AI转换完成: submission_id={submission_id}, "
                     f"原文长度={len(submission.original_content)}, "
                     f"转换后长度={len(transformed_md)}, "
-                    f"图片数量={len(images)}"
+                    f"图片数量={images_count}"
                 )
                 
                 # 创建草稿记录（使用占位符协议）
