@@ -260,6 +260,14 @@
               <span v-if="item.wordpress_post_id" style="margin-left: 10px; color: #909399;">
                 文章ID: {{ item.wordpress_post_id }}
               </span>
+              <a 
+                v-if="item.status === 'success' && item.wordpress_post_id && item.site_url"
+                :href="`${item.site_url}?p=${item.wordpress_post_id}`"
+                target="_blank"
+                style="margin-left: 10px; color: #409eff;"
+              >
+                查看文章 <el-icon><Link /></el-icon>
+              </a>
             </div>
             <div style="color: #909399; font-size: 12px; margin-top: 5px;">
               {{ item.message }}
