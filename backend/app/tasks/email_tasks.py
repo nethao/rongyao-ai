@@ -30,6 +30,10 @@ def fetch_emails_task():
     7. 触发AI转换任务
     """
     import asyncio
+    import nest_asyncio
+    
+    # 允许嵌套事件循环
+    nest_asyncio.apply()
     
     async def _fetch():
         logger.info("开始执行邮件抓取任务")
