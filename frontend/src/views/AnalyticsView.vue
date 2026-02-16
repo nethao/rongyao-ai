@@ -173,40 +173,53 @@ const loadData = async () => {
   }
   
   try {
-    const headers = { 'Authorization': `Bearer ${getToken()}` }
+    const token = getToken()
+    const headers = { 
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+    
+    const queryString = params.toString() ? `?${params}` : ''
     
     // 加载概览
-    const overviewRes = await fetch(`/api/analytics/overview?${params}`, { headers })
+    const overviewRes = await fetch(`/api/analytics/overview${queryString}`, { headers })
+    if (!overviewRes.ok) throw new Error('加载概览失败')
     overview.value = await overviewRes.json()
     
     // 加载趋势
-    const trendsRes = await fetch(`/api/analytics/trends?${params}`, { headers })
+    const trendsRes = await fetch(`/api/analytics/trends${queryString}`, { headers })
+    if (!trendsRes.ok) throw new Error('加载趋势失败')
     trends.value = await trendsRes.json()
     
     // 加载采编统计
-    const editorsRes = await fetch(`/api/analytics/editors?${params}`, { headers })
+    const editorsRes = await fetch(`/api/analytics/editors${queryString}`, { headers })
+    if (!editorsRes.ok) throw new Error('加载采编统计失败')
     editors.value = await editorsRes.json()
     
     // 加载媒体统计
-    const mediaRes = await fetch(`/api/analytics/media?${params}`, { headers })
+    const mediaRes = await fetch(`/api/analytics/media${queryString}`, { headers })
+    if (!mediaRes.ok) throw new Error('加载媒体统计失败')
     media.value = await mediaRes.json()
     
     // 加载单位统计
-    const unitsRes = await fetch(`/api/analytics/units?${params}`, { headers })
+    const unitsRes = await fetch(`/api/analytics/units${queryString}`, { headers })
+    if (!unitsRes.ok) throw new Error('加载单位统计失败')
     units.value = await unitsRes.json()
     
     // 加载站点统计
-    const sitesRes = await fetch(`/api/analytics/sites?${params}`, { headers })
+    const sitesRes = await fetch(`/api/analytics/sites${queryString}`, { headers })
+    if (!sitesRes.ok) throw new Error('加载站点统计失败')
     sites.value = await sitesRes.json()
     
     // 加载来源统计
-    const sourcesRes = await fetch(`/api/analytics/sources?${params}`, { headers })
+    const sourcesRes = await fetch(`/api/analytics/sources${queryString}`, { headers })
+    if (!sourcesRes.ok) throw new Error('加载来源统计失败')
     sources.value = await sourcesRes.json()
     
     ElMessage.success('数据加载成功')
   } catch (error) {
     console.error('加载数据失败:', error)
-    ElMessage.error('加载数据失败')
+    ElMessage.error(error.message || '加载数据失败')
   }
 }
 
