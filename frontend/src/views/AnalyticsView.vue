@@ -24,22 +24,83 @@
       <!-- 概览统计 -->
       <el-row :gutter="20" style="margin-top: 20px;">
         <el-col :span="6">
-          <el-statistic title="总投稿数" :value="overview.total" />
+          <el-card shadow="hover" :body-style="{ padding: '20px' }">
+            <el-statistic title="总投稿数" :value="overview.total">
+              <template #suffix>
+                <span style="font-size: 14px; color: #909399;">篇</span>
+              </template>
+            </el-statistic>
+          </el-card>
         </el-col>
         <el-col :span="6">
-          <el-statistic title="待处理" :value="overview.pending" />
+          <el-card shadow="hover" :body-style="{ padding: '20px' }">
+            <el-statistic title="待处理" :value="overview.pending">
+              <template #suffix>
+                <span style="font-size: 14px; color: #e6a23c;">篇</span>
+              </template>
+            </el-statistic>
+          </el-card>
         </el-col>
         <el-col :span="6">
-          <el-statistic title="已完成" :value="overview.completed" />
+          <el-card shadow="hover" :body-style="{ padding: '20px' }">
+            <el-statistic title="已完成" :value="overview.completed">
+              <template #suffix>
+                <span style="font-size: 14px; color: #67c23a;">篇</span>
+              </template>
+            </el-statistic>
+          </el-card>
         </el-col>
         <el-col :span="6">
-          <el-statistic title="已发布" :value="overview.published" />
+          <el-card shadow="hover" :body-style="{ padding: '20px' }">
+            <el-statistic title="已发布" :value="overview.published">
+              <template #suffix>
+                <span style="font-size: 14px; color: #409eff;">篇</span>
+              </template>
+            </el-statistic>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 快速入口 -->
+      <el-row :gutter="20" style="margin-top: 20px;">
+        <el-col :span="8">
+          <el-card shadow="hover" class="quick-link" @click="scrollTo('trends')">
+            <div class="quick-link-content">
+              <el-icon :size="32" color="#409eff"><TrendCharts /></el-icon>
+              <div class="quick-link-text">
+                <div class="quick-link-title">投稿趋势</div>
+                <div class="quick-link-desc">查看每日投稿统计</div>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="8">
+          <el-card shadow="hover" class="quick-link" @click="scrollTo('editors')">
+            <div class="quick-link-content">
+              <el-icon :size="32" color="#67c23a"><User /></el-icon>
+              <div class="quick-link-text">
+                <div class="quick-link-title">采编统计</div>
+                <div class="quick-link-desc">查看采编投稿排行</div>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="8">
+          <el-card shadow="hover" class="quick-link" @click="scrollTo('sites')">
+            <div class="quick-link-content">
+              <el-icon :size="32" color="#e6a23c"><Monitor /></el-icon>
+              <div class="quick-link-text">
+                <div class="quick-link-title">站点统计</div>
+                <div class="quick-link-desc">查看发布成功率</div>
+              </div>
+            </div>
+          </el-card>
         </el-col>
       </el-row>
     </el-card>
 
     <!-- 投稿趋势 -->
-    <el-card style="margin-top: 20px;">
+    <el-card id="trends" style="margin-top: 20px;">
       <template #header>
         <span>投稿趋势统计</span>
       </template>
@@ -57,7 +118,7 @@
     </el-card>
 
     <!-- 采编投稿统计 -->
-    <el-card style="margin-top: 20px;">
+    <el-card id="editors" style="margin-top: 20px;">
       <template #header>
         <span>采编投稿统计</span>
       </template>
@@ -115,7 +176,7 @@
     </el-card>
 
     <!-- 站点发布统计 -->
-    <el-card style="margin-top: 20px;">
+    <el-card id="sites" style="margin-top: 20px;">
       <template #header>
         <span>站点发布统计</span>
       </template>
@@ -153,6 +214,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { TrendCharts, User, Monitor } from '@element-plus/icons-vue'
 
 const dateRange = ref([])
 const overview = ref({ total: 0, pending: 0, completed: 0, published: 0 })
@@ -228,6 +290,13 @@ const resetDate = () => {
   loadData()
 }
 
+const scrollTo = (id) => {
+  const element = document.getElementById(id)
+  if (element) {
+    element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+}
+
 onMounted(() => {
   loadData()
 })
@@ -240,5 +309,36 @@ onMounted(() => {
 
 .header-card h2 {
   margin: 0;
+}
+
+.quick-link {
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.quick-link:hover {
+  transform: translateY(-4px);
+}
+
+.quick-link-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.quick-link-text {
+  flex: 1;
+}
+
+.quick-link-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: #303133;
+  margin-bottom: 4px;
+}
+
+.quick-link-desc {
+  font-size: 12px;
+  color: #909399;
 }
 </style>
