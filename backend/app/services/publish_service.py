@@ -95,7 +95,7 @@ class PublishService:
         draft_id: int,
         site_id: int,
         status: str = "publish",
-        author_id: Optional[int] = None
+        system_username: Optional[str] = None
     ) -> tuple[bool, Optional[int], Optional[str], Optional[str]]:
         """
         发布草稿到WordPress站点
@@ -104,7 +104,7 @@ class PublishService:
             draft_id: 草稿ID
             site_id: 目标站点ID
             status: 发布状态 ('draft', 'publish', 'pending')
-            author_id: WordPress作者ID（可选）
+            system_username: 系统用户名（用于匹配WordPress作者）
             
         Returns:
             (是否成功, WordPress文章ID, 错误信息, 站点名称)
@@ -149,6 +149,15 @@ class PublishService:
         
         # 发布到WordPress
         wp_service = WordPressService(site, api_password)
+        
+        # 获取或创建WordPress作者
+        author_id = None
+        if system_username:
+            author_id = await wp_service.get_or_create_author(system_username, site_id, self.db)
+            if not author_id:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"无法获取WordPress作者ID，将使用API认证用户: {system_username}")
         
         # 获取标题（从投稿的邮件主题）
         title = submission.email_subject or "无标题"

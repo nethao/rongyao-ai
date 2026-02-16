@@ -26,11 +26,6 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="wp_author_id" label="WP作者ID" width="110">
-          <template #default="{ row }">
-            {{ row.wp_author_id || '-' }}
-          </template>
-        </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
@@ -96,17 +91,6 @@
             <el-option label="编辑人员" value="editor" />
           </el-select>
         </el-form-item>
-        <el-form-item label="WP作者ID">
-          <el-input-number 
-            v-model="addForm.wp_author_id" 
-            :min="1" 
-            placeholder="WordPress站点的用户ID"
-            style="width: 100%"
-          />
-          <div style="color: #909399; font-size: 12px; margin-top: 4px;">
-            发布文章时将使用此ID作为作者
-          </div>
-        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="addDialogVisible = false">取消</el-button>
@@ -130,17 +114,6 @@
             <el-option label="管理员" value="admin" />
             <el-option label="编辑人员" value="editor" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="WP作者ID">
-          <el-input-number 
-            v-model="editForm.wp_author_id" 
-            :min="1" 
-            placeholder="WordPress站点的用户ID"
-            style="width: 100%"
-          />
-          <div style="color: #909399; font-size: 12px; margin-top: 4px;">
-            发布文章时将使用此ID作为作者
-          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -214,7 +187,7 @@ onMounted(loadUsers)
 const addDialogVisible = ref(false)
 const addSubmitting = ref(false)
 const addFormRef = ref(null)
-const addForm = ref({ username: '', password: '', role: 'editor', wp_author_id: null })
+const addForm = ref({ username: '', password: '', role: 'editor' })
 const addRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [
@@ -225,12 +198,12 @@ const addRules = {
 }
 
 function openAddDialog() {
-  addForm.value = { username: '', password: '', role: 'editor', wp_author_id: null }
+  addForm.value = { username: '', password: '', role: 'editor' }
   addDialogVisible.value = true
 }
 
 function resetAddForm() {
-  addForm.value = { username: '', password: '', role: 'editor', wp_author_id: null }
+  addForm.value = { username: '', password: '', role: 'editor' }
 }
 
 const submitAdd = async () => {
@@ -255,18 +228,13 @@ const submitAdd = async () => {
 const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
 const editFormRef = ref(null)
-const editForm = ref({ id: null, username: '', role: 'editor', wp_author_id: null })
+const editForm = ref({ id: null, username: '', role: 'editor' })
 const editRules = {
   role: [{ required: true, message: '请选择角色', trigger: 'change' }]
 }
 
 function openEditDialog(row) {
-  editForm.value = { 
-    id: row.id, 
-    username: row.username, 
-    role: row.role,
-    wp_author_id: row.wp_author_id 
-  }
+  editForm.value = { id: row.id, username: row.username, role: row.role }
   editDialogVisible.value = true
 }
 
@@ -276,10 +244,7 @@ const submitEdit = async () => {
     if (!valid) return
     editSubmitting.value = true
     try {
-      await updateUser(editForm.value.id, { 
-        role: editForm.value.role,
-        wp_author_id: editForm.value.wp_author_id 
-      })
+      await updateUser(editForm.value.id, { role: editForm.value.role })
       ElMessage.success('已保存')
       editDialogVisible.value = false
       loadUsers()

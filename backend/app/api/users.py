@@ -77,14 +77,10 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    """更新用户（角色和WordPress作者ID）"""
+    """更新用户角色"""
     auth_service = AuthService(db)
     try:
-        user = await auth_service.update_user(
-            user_id, 
-            role=body.role,
-            wp_author_id=body.wp_author_id
-        )
+        user = await auth_service.update_user(user_id, role=body.role)
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
         return UserSchema.model_validate(user)

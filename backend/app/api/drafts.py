@@ -269,7 +269,7 @@ async def publish_draft(
         draft_id=draft_id,
         site_id=publish_request.site_id,
         status="publish",
-        author_id=current_user.wp_author_id  # 使用当前用户的WP作者ID
+        system_username=current_user.username  # 传递系统用户名
     )
     
     if success:

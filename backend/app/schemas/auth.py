@@ -10,7 +10,6 @@ class UserBase(BaseModel):
     """用户基础模型"""
     username: str
     role: str
-    wp_author_id: Optional[int] = None  # WordPress作者ID
 
 
 class UserCreate(UserBase):
@@ -21,7 +20,6 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     """用户更新模型"""
     role: str  # 'admin' | 'editor'
-    wp_author_id: Optional[int] = None  # WordPress作者ID
 
 
 class AdminResetPasswordRequest(BaseModel):

@@ -2,8 +2,14 @@
 WordPress REST API客户端服务
 """
 import httpx
+import secrets
+import string
 from typing import Optional, Dict, Any
+from urllib.parse import urlparse
 from app.models.wordpress_site import WordPressSite
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class WordPressService:
@@ -122,6 +128,154 @@ class WordPressService:
             return False, None, "无法连接到站点"
         except Exception as e:
             return False, None, f"发布错误: {str(e)}"
+
+    async def get_user_by_username(self, username: str) -> Optional[int]:
+        """
+        根据用户名查询WordPress用户ID
+        
+        Args:
+            username: 用户名
+            
+        Returns:
+            用户ID，未找到返回None
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self.api_url}/users",
+                    params={"search": username},
+                    auth=(self.username, self.password)
+                )
+                
+                if response.status_code == 200:
+                    users = response.json()
+                    # 精确匹配用户名
+                    for user in users:
+                        if user.get("slug") == username or user.get("name") == username:
+                            return user.get("id")
+                    return None
+                else:
+                    logger.warning(f"查询WordPress用户失败: HTTP {response.status_code}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"查询WordPress用户异常: {e}")
+            return None
+
+    async def create_user(self, username: str, email: str) -> Optional[int]:
+        """
+        创建WordPress用户
+        
+        Args:
+            username: 用户名
+            email: 邮箱地址
+            
+        Returns:
+            新用户ID，创建失败返回None
+        """
+        try:
+            # 生成16位随机密码
+            password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{self.api_url}/users",
+                    json={
+                        "username": username,
+                        "email": email,
+                        "password": password,
+                        "roles": ["author"]
+                    },
+                    auth=(self.username, self.password)
+                )
+                
+                if response.status_code in [200, 201]:
+                    result = response.json()
+                    user_id = result.get("id")
+                    logger.info(f"成功创建WordPress用户: {username} (ID: {user_id})")
+                    return user_id
+                else:
+                    logger.warning(f"创建WordPress用户失败: HTTP {response.status_code}, {response.text[:200]}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"创建WordPress用户异常: {e}")
+            return None
+
+    def _extract_domain(self, url: str) -> str:
+        """
+        从URL提取域名
+        
+        Args:
+            url: 完整URL
+            
+        Returns:
+            域名（去掉www前缀）
+        """
+        parsed = urlparse(url)
+        domain = parsed.netloc or parsed.path
+        # 去掉www前缀
+        if domain.startswith('www.'):
+            domain = domain[4:]
+        return domain
+
+    async def get_or_create_author(self, system_username: str, site_id: int, db) -> Optional[int]:
+        """
+        获取或创建WordPress作者
+        
+        流程：
+        1. 查询缓存表
+        2. 缓存未命中 -> 查询WordPress用户
+        3. 用户不存在 -> 创建WordPress用户
+        4. 保存到缓存
+        
+        Args:
+            system_username: 系统用户名
+            site_id: 站点ID
+            db: 数据库会话
+            
+        Returns:
+            WordPress用户ID，失败返回None
+        """
+        from sqlalchemy import select, text
+        
+        # 1. 查询缓存
+        result = await db.execute(
+            text("SELECT wp_user_id FROM wp_author_cache WHERE system_username = :username AND site_id = :site_id"),
+            {"username": system_username, "site_id": site_id}
+        )
+        cached = result.fetchone()
+        if cached:
+            logger.info(f"使用缓存的WordPress作者ID: {cached[0]}")
+            return cached[0]
+        
+        # 2. 查询WordPress用户
+        wp_user_id = await self.get_user_by_username(system_username)
+        
+        # 3. 用户不存在，尝试创建
+        if not wp_user_id:
+            domain = self._extract_domain(self.site.url)
+            email = f"{system_username}@{domain}"
+            logger.info(f"WordPress用户不存在，尝试创建: {system_username} ({email})")
+            wp_user_id = await self.create_user(system_username, email)
+        
+        # 4. 保存到缓存
+        if wp_user_id:
+            try:
+                await db.execute(
+                    text("""
+                        INSERT INTO wp_author_cache (system_username, site_id, wp_user_id)
+                        VALUES (:username, :site_id, :wp_user_id)
+                        ON CONFLICT (system_username, site_id) DO UPDATE SET wp_user_id = :wp_user_id
+                    """),
+                    {"username": system_username, "site_id": site_id, "wp_user_id": wp_user_id}
+                )
+                await db.commit()
+                logger.info(f"已缓存WordPress作者映射: {system_username} -> {wp_user_id}")
+            except Exception as e:
+                logger.error(f"保存作者缓存失败: {e}")
+        
+        return wp_user_id
 
     async def update_post(
         self,
