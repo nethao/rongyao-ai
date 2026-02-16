@@ -433,16 +433,56 @@ async def delete_submission(
     current_user: User = Depends(get_current_user),
 ):
     """
-    删除投稿（同时删除关联的图片、草稿等）
+    删除投稿（同时删除关联的图片、草稿、OSS文件等）
     """
-    query = select(Submission).where(Submission.id == submission_id)
+    from sqlalchemy.orm import selectinload
+    from app.services.oss_service import OSSService
+    
+    # 加载投稿及其关联的图片
+    query = select(Submission).options(
+        selectinload(Submission.images)
+    ).where(Submission.id == submission_id)
     result = await db.execute(query)
     submission = result.scalar_one_or_none()
+    
     if not submission:
         raise HTTPException(status_code=404, detail="投稿不存在")
+    
+    # 删除OSS上的图片文件
+    oss_service = OSSService()
+    deleted_count = 0
+    failed_count = 0
+    
+    for image in submission.images:
+        try:
+            # 从OSS URL提取key
+            if image.oss_url:
+                # URL格式: https://bucket.oss-region.aliyuncs.com/path/to/file
+                oss_key = image.oss_url.split('.aliyuncs.com/')[-1]
+                if oss_service.delete_file(oss_key):
+                    deleted_count += 1
+                    logger.info(f"删除OSS文件成功: {oss_key}")
+                else:
+                    failed_count += 1
+                    logger.warning(f"删除OSS文件失败: {oss_key}")
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"删除OSS文件异常: {image.oss_url}, 错误: {e}")
+    
+    # 删除数据库记录（级联删除图片和草稿）
     await db.delete(submission)
     await db.commit()
-    return {"message": "删除成功"}
+    
+    logger.info(
+        f"删除投稿完成: submission_id={submission_id}, "
+        f"OSS文件删除成功={deleted_count}, 失败={failed_count}"
+    )
+    
+    return {
+        "message": "删除成功",
+        "oss_deleted": deleted_count,
+        "oss_failed": failed_count
+    }
 
 
 @router.post("/{submission_id}/transform")
