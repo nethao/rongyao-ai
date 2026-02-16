@@ -5,12 +5,13 @@ import logging
 from typing import Optional
 from datetime import datetime
 
-from sqlalchemy import text
+from sqlalchemy import text, select
 from app.tasks import celery_app
 from app.database import AsyncSessionLocal
 from app.services.llm_service import LLMService, LLMServiceError
 from app.services.prompt_builder import PromptBuilder
 from app.services.submission_service import SubmissionService
+from app.models.draft import Draft
 
 
 logger = logging.getLogger(__name__)
