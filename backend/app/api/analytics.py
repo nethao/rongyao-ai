@@ -25,10 +25,10 @@ async def get_overview(
     params = {}
     
     if start_date:
-        where_clause += " AND created_at::date >= :start_date::date"
+        where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND created_at::date <= :end_date::date"
+        where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -67,10 +67,10 @@ async def get_trends(
     params = {}
     
     if start_date:
-        where_clause += " AND created_at::date >= :start_date::date"
+        where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND created_at::date <= :end_date::date"
+        where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -117,10 +117,10 @@ async def get_editor_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND created_at::date >= :start_date::date"
+        where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND created_at::date <= :end_date::date"
+        where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -172,10 +172,10 @@ async def get_media_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND created_at::date >= :start_date::date"
+        where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND created_at::date <= :end_date::date"
+        where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -221,10 +221,10 @@ async def get_unit_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND created_at::date >= :start_date::date"
+        where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND created_at::date <= :end_date::date"
+        where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -270,10 +270,10 @@ async def get_user_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND ph.created_at::date >= :start_date::date"
+        where_clause += " AND ph.CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND ph.created_at::date <= :end_date::date"
+        where_clause += " AND ph.CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -318,10 +318,10 @@ async def get_site_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND ph.created_at::date >= :start_date::date"
+        where_clause += " AND ph.CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND ph.created_at::date <= :end_date::date"
+        where_clause += " AND ph.CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -366,10 +366,10 @@ async def get_source_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND created_at::date >= :start_date::date"
+        where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND created_at::date <= :end_date::date"
+        where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
         params["end_date"] = end_date
     
     result = await db.execute(
