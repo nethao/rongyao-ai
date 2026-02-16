@@ -163,7 +163,7 @@ const units = ref([])
 const sites = ref([])
 const sources = ref([])
 
-const getToken = () => localStorage.getItem('token')
+const getToken = () => localStorage.getItem('access_token')
 
 const loadData = async () => {
   const params = new URLSearchParams()
