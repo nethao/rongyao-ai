@@ -180,7 +180,7 @@ async def preview_content(
                     # 提取图片
                     images = doc_processor.extract_images_from_docx(temp_file.name)
                 
-                # 上传图片
+                # 上传图片（注意：Word文档的占位符从1开始）
                 for idx, (img_filename, img_data) in enumerate(images):
                     try:
                         oss_url, oss_key = oss_service.upload_file(
@@ -188,11 +188,12 @@ async def preview_content(
                             filename=img_filename,
                             folder='images'
                         )
-                        placeholder = f"[[IMG_{idx}]]"
+                        # Word文档占位符从1开始，所以idx+1
+                        placeholder = f"[[IMG_{idx+1}]]"
                         media_map[placeholder] = oss_url
-                        logger.info(f"预览上传Word图片 {idx}: {oss_url}")
+                        logger.info(f"预览上传Word图片 {idx+1}: {oss_url}")
                     except Exception as e:
-                        logger.error(f"预览上传Word图片失败 {idx}: {e}")
+                        logger.error(f"预览上传Word图片失败 {idx+1}: {e}")
                 
                 content_source = "docx" if suffix.lower() == '.docx' else "doc"
                 image_count = len(media_map)
