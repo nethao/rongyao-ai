@@ -186,11 +186,14 @@ async def process_email(email_data, doc_processor, oss_service):
             
             elif content_type == ContentType.WORD:
                 # 处理Word文档附件
+                logger.info("开始处理Word文档")
                 temp_file_path = None
                 docx_path_to_clean = None
                 
                 try:
+                    logger.info(f"Word附件数量: {len(email_data.attachments)}")
                     for filename, file_data in email_data.attachments:
+                        logger.info(f"处理Word文件: {filename}")
                         # 保存附件到临时文件
                         temp_file = tempfile.NamedTemporaryFile(
                             delete=False,
@@ -199,6 +202,7 @@ async def process_email(email_data, doc_processor, oss_service):
                         temp_file.write(file_data)
                         temp_file.close()
                         temp_file_path = temp_file.name
+                        logger.info(f"临时文件已保存: {temp_file_path}")
                         
                         # 处理Word文档
                         if filename.lower().endswith('.doc'):
@@ -223,8 +227,12 @@ async def process_email(email_data, doc_processor, oss_service):
                                 logger.info(f"从Word文档提取标题: {title}, 占用{title_lines}行")
                             # 提取文本时跳过标题行
                             content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
+                except Exception as e:
+                    logger.error(f"Word处理异常: {e}", exc_info=True)
+                    raise
                 finally:
                     # 清理临时文件
+                    logger.info(f"清理临时文件: temp_file_path={temp_file_path}, docx_path_to_clean={docx_path_to_clean}")
                     if temp_file_path and os.path.exists(temp_file_path):
                         os.unlink(temp_file_path)
                         logger.info(f"已清理临时文件: {temp_file_path}")
