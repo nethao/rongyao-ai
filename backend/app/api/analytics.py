@@ -25,10 +25,10 @@ async def get_overview(
     params = {}
     
     if start_date:
-        where_clause += " AND created_at >= :start_date"
+        where_clause += " AND DATE(created_at) >= :start_date"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND created_at <= :end_date"
+        where_clause += " AND DATE(created_at) <= :end_date"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -117,10 +117,10 @@ async def get_editor_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND created_at >= :start_date"
+        where_clause += " AND DATE(created_at) >= :start_date"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND created_at <= :end_date"
+        where_clause += " AND DATE(created_at) <= :end_date"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -172,10 +172,10 @@ async def get_media_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND created_at >= :start_date"
+        where_clause += " AND DATE(created_at) >= :start_date"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND created_at <= :end_date"
+        where_clause += " AND DATE(created_at) <= :end_date"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -221,10 +221,10 @@ async def get_unit_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND created_at >= :start_date"
+        where_clause += " AND DATE(created_at) >= :start_date"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND created_at <= :end_date"
+        where_clause += " AND DATE(created_at) <= :end_date"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -270,10 +270,10 @@ async def get_user_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND ph.created_at >= :start_date"
+        where_clause += " AND DATE(ph.created_at) >= :start_date"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND ph.created_at <= :end_date"
+        where_clause += " AND DATE(ph.created_at) <= :end_date"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -318,10 +318,10 @@ async def get_site_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND ph.created_at >= :start_date"
+        where_clause += " AND DATE(ph.created_at) >= :start_date"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND ph.created_at <= :end_date"
+        where_clause += " AND DATE(ph.created_at) <= :end_date"
         params["end_date"] = end_date
     
     result = await db.execute(
@@ -366,10 +366,10 @@ async def get_source_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND created_at >= :start_date"
+        where_clause += " AND DATE(created_at) >= :start_date"
         params["start_date"] = start_date
     if end_date:
-        where_clause += " AND created_at <= :end_date"
+        where_clause += " AND DATE(created_at) <= :end_date"
         params["end_date"] = end_date
     
     result = await db.execute(
