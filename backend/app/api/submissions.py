@@ -395,9 +395,20 @@ async def list_submissions(
         logger.exception("list_submissions query failed: %s", e)
         raise HTTPException(status_code=500, detail=f"查询投稿列表失败: {str(e)}")
 
+    # 为每个投稿添加can_edit权限
+    items = []
+    for sub in submissions:
+        sub_dict = SubmissionSchema.model_validate(sub).model_dump()
+        # 编辑人员只能编辑状态为completed的投稿
+        if current_user.role == 'editor':
+            sub_dict['can_edit'] = sub.status == 'completed'
+        else:
+            sub_dict['can_edit'] = True
+        items.append(SubmissionSchema(**sub_dict))
+
     try:
         return SubmissionListResponse(
-            items=submissions,
+            items=items,
             total=total,
             page=page,
             size=size,

@@ -71,6 +71,7 @@ class SubmissionSchema(SubmissionBase):
     updated_at: datetime
     images: List[SubmissionImageSchema] = []
     drafts: List[DraftSummarySchema] = []
+    can_edit: Optional[bool] = True  # 当前用户是否可编辑
 
 
 class SubmissionListResponse(BaseModel):

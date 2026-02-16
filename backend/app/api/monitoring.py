@@ -172,37 +172,71 @@ async def get_fetch_emails_status(
     current_user: User = Depends(require_admin)
 ):
     """
-    获取最新的邮件抓取任务状态（仅管理员）
+    获取最新的邮件抓取任务状态（仅管理员）。只返回「本次任务」的日志：
+    从最近一条 status=started 到当前的所有 fetch_email 日志。
     """
-    # 查询最新的 fetch_email 任务日志
+    # 查询最近的 fetch_email 日志（足够多以便找到本次 run 的起点）
     query = (
         select(TaskLog)
         .where(TaskLog.task_type == "fetch_email")
         .order_by(desc(TaskLog.created_at))
-        .limit(10)
+        .limit(50)
     )
     result = await db.execute(query)
-    logs = result.scalars().all()
-    
-    if not logs:
+    rows = result.scalars().all()
+
+    if not rows:
         return {
             "status": "idle",
             "message": "暂无邮件抓取任务",
             "logs": []
         }
+
+    # 只认「本轮抓取」的 started：message 为「开始抓取邮箱未读邮件」，避免把单封邮件的 started 当成本轮起点
+    RUN_START_MESSAGE = "开始抓取邮箱未读邮件"
+    run_start_idx = None
+    for i, log in enumerate(rows):
+        if log.status == "started" and log.message and log.message.strip() == RUN_START_MESSAGE:
+            run_start_idx = i
+            break
     
-    latest = logs[0]
+    if run_start_idx is None:
+        # 没找到本轮开始，返回最近10条日志（按时间正序）
+        recent_logs = list(reversed(rows[:10]))
+        latest = rows[0] if rows else None
+        if not latest:
+            return {
+                "status": "idle",
+                "message": "暂无邮件抓取任务",
+                "logs": []
+            }
+        return {
+            "status": latest.status,
+            "message": latest.message,
+            "created_at": latest.created_at.isoformat(),
+            "logs": [
+                {"status": log.status, "message": log.message, "created_at": log.created_at.isoformat()}
+                for log in recent_logs
+            ]
+        }
+
+    # 本轮任务日志：从该 run 起点到当前，按时间正序
+    # rows 是倒序（最新的在前），run_start_idx 对应本轮最早一条 started，
+    # 因此应取 rows[:run_start_idx+1]（本轮所有日志，倒序）再 reversed 为正序。
+    run_rows_desc = rows[:run_start_idx + 1]
+    run_logs = list(reversed(run_rows_desc))
+    latest = run_rows_desc[0] if run_rows_desc else rows[0]
+    
+    # 如果日志太多（超过50条），只返回最近50条，避免前端显示过长
+    logs_for_response = run_logs[-50:] if len(run_logs) > 50 else run_logs
+    
     return {
-        "status": latest.status,  # 'started', 'success', 'failed'
+        "status": latest.status,
         "message": latest.message,
         "created_at": latest.created_at.isoformat(),
         "logs": [
-            {
-                "status": log.status,
-                "message": log.message,
-                "created_at": log.created_at.isoformat()
-            }
-            for log in logs[:5]  # 返回最近5条
+            {"status": log.status, "message": log.message, "created_at": log.created_at.isoformat()}
+            for log in logs_for_response
         ]
     }
 

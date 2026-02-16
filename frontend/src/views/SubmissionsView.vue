@@ -224,6 +224,7 @@
                 type="primary"
                 size="small"
                 @click.stop="handleViewDraft(row)"
+                :disabled="!row.can_edit"
               >
                 查看草稿
               </el-button>
@@ -231,6 +232,7 @@
                 type="success"
                 size="small"
                 @click.stop="handleTransform(row)"
+                :disabled="!row.can_edit"
               >
                 AI转换
               </el-button>
@@ -241,6 +243,7 @@
               type="success"
               size="small"
               @click.stop="handleTransform(row)"
+              :disabled="!row.can_edit"
             >
               AI转换
             </el-button>
@@ -255,6 +258,7 @@
               type="danger"
               size="small"
               @click.stop="handleDelete(row)"
+              :disabled="!row.can_edit"
             >
               删除
             </el-button>

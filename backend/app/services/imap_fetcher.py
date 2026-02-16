@@ -98,14 +98,16 @@ class IMAPFetcher:
     def fetch_unread_emails(
         self,
         limit: int = 10,
-        mark_as_read: bool = False
+        mark_as_read: bool = False,
+        fallback_recent_limit: int = 5
     ) -> List[EmailData]:
         """
-        获取未读邮件
+        获取未读邮件；若未读为 0 则按 fallback_recent_limit 抓取最近几封（避免因已读而一直抓不到）。
         
         Args:
-            limit: 最多获取的邮件数量
-            mark_as_read: 是否标记为已读
+            limit: 最多获取的未读邮件数量
+            mark_as_read: 是否在提取后标记为已读
+            fallback_recent_limit: 未读为 0 时，抓取最近多少封邮件（0 表示不 fallback）
         
         Returns:
             List[EmailData]: 邮件数据列表
@@ -114,25 +116,31 @@ class IMAPFetcher:
         
         try:
             with self.connect() as mailbox:
-                # 获取未读邮件（使用UNSEEN标准IMAP搜索条件）
-                messages = mailbox.fetch(
-                    criteria='UNSEEN',
+                # 必须传 mark_seen=False，否则 imap_tools 在 fetch 时就会把邮件标为已读，下次就抓不到未读了
+                messages = list(mailbox.fetch(
+                    criteria=AND(seen=False),
                     limit=limit,
-                    reverse=True  # 最新的邮件优先
-                )
+                    reverse=True,
+                    mark_seen=False
+                ))
+                
+                # 未读为 0 且允许 fallback 时，抓取最近几封（可能已被其他客户端标为已读）
+                if len(messages) == 0 and fallback_recent_limit and fallback_recent_limit > 0:
+                    logger.info(f"未读邮件为 0，尝试抓取最近 {fallback_recent_limit} 封邮件")
+                    messages = list(mailbox.fetch(
+                        criteria='ALL',
+                        limit=fallback_recent_limit,
+                        reverse=True,
+                        mark_seen=False
+                    ))
                 
                 for msg in messages:
                     try:
-                        # 提取邮件数据
                         email_data = self._extract_email_data(msg)
                         emails.append(email_data)
-                        
-                        # 标记为已读
                         if mark_as_read:
                             mailbox.flag(msg.uid, ['\\Seen'], True)
-                        
                         logger.info(f"成功提取邮件: {email_data.subject}")
-                    
                     except Exception as e:
                         logger.error(f"提取邮件失败: {str(e)}")
                         continue

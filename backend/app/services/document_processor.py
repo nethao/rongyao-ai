@@ -2,6 +2,7 @@
 文档处理服务
 """
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -54,25 +55,31 @@ class DocumentProcessor:
         output_dir = output_dir or self.temp_dir
         os.makedirs(output_dir, exist_ok=True)
         
+        # 每次转换使用独立的 LibreOffice 用户配置目录，避免多任务/连续转换时的锁等待导致卡住
+        _tf = __import__("tempfile")
+        profile_dir = _tf.mkdtemp(prefix="lo_profile_")
         try:
             # 调用LibreOffice进行转换
             # --headless: 无界面模式
+            # -env:UserInstallation: 独立配置目录，避免与其它进程争用
             # --convert-to docx: 转换为docx格式
             # --outdir: 输出目录
+            profile_uri = "file://" + profile_dir
             cmd = [
                 'libreoffice',
                 '--headless',
+                f'-env:UserInstallation={profile_uri}',
                 '--convert-to', 'docx',
                 '--outdir', output_dir,
                 doc_path
             ]
             
-            logger.info(f"开始转换文档: {doc_path}")
+            logger.info(f"开始转换文档: {doc_path} (profile={profile_dir})")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=60  # 60秒超时
+                timeout=120  # 120秒超时，首启或大文件可能较慢
             )
             
             if result.returncode != 0:
@@ -80,12 +87,38 @@ class DocumentProcessor:
                 logger.error(f"LibreOffice转换失败: {error_msg}")
                 raise RuntimeError(f"文档转换失败: {error_msg}")
             
-            # 构建输出文件路径
+            # 构建期望的输出路径；部分环境下 LibreOffice 会写到 profile 目录，需回退查找
             doc_filename = Path(doc_path).stem
-            docx_path = os.path.join(output_dir, f"{doc_filename}.docx")
-            
+            expected_path = os.path.join(output_dir, f"{doc_filename}.docx")
+            docx_path = expected_path
             if not os.path.exists(docx_path):
-                raise RuntimeError(f"转换后的文件不存在: {docx_path}")
+                found_path = None
+                fallback_path = None
+                for search_dir in (output_dir, profile_dir):
+                    if not os.path.isdir(search_dir):
+                        continue
+                    for name in os.listdir(search_dir):
+                        if not name.endswith(".docx"):
+                            continue
+                        candidate = os.path.join(search_dir, name)
+                        if not os.path.isfile(candidate):
+                            continue
+                        if Path(candidate).stem == doc_filename:
+                            found_path = candidate
+                            break
+                        if fallback_path is None:
+                            fallback_path = candidate
+                    if found_path is not None:
+                        break
+                docx_path = found_path or fallback_path
+                if not docx_path or not os.path.exists(docx_path):
+                    raise RuntimeError(f"转换后的文件不存在: {expected_path}")
+                # 若在 profile 目录找到，复制到 output_dir 以便后续逻辑和清理一致
+                if os.path.dirname(docx_path) == profile_dir:
+                    target = os.path.join(output_dir, os.path.basename(docx_path))
+                    shutil.copy2(docx_path, target)
+                    docx_path = target
+                    logger.info(f"从 profile 目录复制到: {docx_path}")
             
             logger.info(f"文档转换成功: {docx_path}")
             return docx_path
@@ -97,6 +130,11 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"文档转换异常: {str(e)}")
             raise
+        finally:
+            try:
+                shutil.rmtree(profile_dir, ignore_errors=True)
+            except Exception:
+                pass
     
     def extract_text_from_docx(self, docx_path: str, skip_title_lines: int = 0) -> str:
         """

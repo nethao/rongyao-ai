@@ -2,7 +2,7 @@
 邮件抓取相关的Celery任务
 """
 import os
-import tempfile
+import tempfile  # 仅用于确保 sys.modules['tempfile'] 已加载，process_email 内用 sys.modules 引用
 from sqlalchemy import text
 from app.tasks import celery_app
 from app.database import AsyncSessionLocal
@@ -113,7 +113,9 @@ async def process_email(email_data, doc_processor, oss_service):
     """
     from app.services.email_parser import EmailParser, ContentType
     from app.services.web_fetcher import WebFetcher
-    
+    import sys
+    _tf = sys.modules["tempfile"]
+
     async with AsyncSessionLocal() as db:
         submission_service = SubmissionService(db)
         
@@ -195,7 +197,7 @@ async def process_email(email_data, doc_processor, oss_service):
                     for filename, file_data in email_data.attachments:
                         logger.info(f"处理Word文件: {filename}")
                         # 保存附件到临时文件
-                        temp_file = tempfile.NamedTemporaryFile(
+                        temp_file = _tf.NamedTemporaryFile(
                             delete=False,
                             suffix=os.path.splitext(filename)[1]
                         )
@@ -207,9 +209,11 @@ async def process_email(email_data, doc_processor, oss_service):
                         # 处理Word文档
                         if filename.lower().endswith('.doc'):
                             doc_path = temp_file_path
-                            # 转换为docx
+                            # 转换为docx（可能较慢，最多约 120 秒）
+                            logger.info("开始将 .doc 转为 .docx")
                             docx_path = doc_processor.convert_doc_to_docx(doc_path)
                             docx_path_to_clean = docx_path
+                            logger.info(".doc 转换完成，开始提取标题与正文")
                             # 先提取标题
                             doc_title, title_lines = doc_processor.extract_title_from_docx(docx_path)
                             if doc_title and doc_title != "无标题":
@@ -220,6 +224,7 @@ async def process_email(email_data, doc_processor, oss_service):
                         
                         elif filename.lower().endswith('.docx'):
                             docx_path = temp_file_path
+                            logger.info("开始从 .docx 提取标题与正文")
                             # 先提取标题
                             doc_title, title_lines = doc_processor.extract_title_from_docx(docx_path)
                             if doc_title and doc_title != "无标题":
@@ -231,32 +236,28 @@ async def process_email(email_data, doc_processor, oss_service):
                     logger.error(f"Word处理异常: {e}", exc_info=True)
                     raise
                 finally:
-                    # 清理临时文件
-                    logger.info(f"清理临时文件: temp_file_path={temp_file_path}, docx_path_to_clean={docx_path_to_clean}")
-                    if temp_file_path and os.path.exists(temp_file_path):
-                        os.unlink(temp_file_path)
-                        logger.info(f"已清理临时文件: {temp_file_path}")
-                    if docx_path_to_clean and os.path.exists(docx_path_to_clean) and docx_path_to_clean != temp_file_path:
-                        os.unlink(docx_path_to_clean)
-                        logger.info(f"已清理转换后的docx文件: {docx_path_to_clean}")
+                    # 临时文件清理后移到“Word图片提取并上传”之后，
+                    # 否则会导致 docx_path 不存在，图片无法提取，只剩占位符。
+                    logger.info(
+                        f"暂缓清理Word临时文件: temp_file_path={temp_file_path}, "
+                        f"docx_path_to_clean={docx_path_to_clean}"
+                    )
             
             elif content_type == ContentType.ARCHIVE:
-                # 处理压缩包 - 解压并处理Word+图片
+                # 处理压缩包 - 解压并处理Word+图片（临时文件统一用函数内 _tf）
                 import zipfile
-                import tempfile
-                import os
-                
+
                 for filename, file_data in email_data.attachments:
                     if filename.lower().endswith('.zip'):
                         logger.info(f"发现压缩包: {filename}, 大小: {len(file_data)/1024/1024:.2f}MB")
                         
                         # 保存压缩包到临时文件
-                        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as zip_file:
+                        with _tf.NamedTemporaryFile(delete=False, suffix='.zip') as zip_file:
                             zip_file.write(file_data)
                             zip_path = zip_file.name
                         
                         # 解压到临时目录
-                        extract_dir = tempfile.mkdtemp()
+                        extract_dir = _tf.mkdtemp()
                         try:
                             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                                 zip_ref.extractall(extract_dir)
@@ -486,30 +487,43 @@ async def process_email(email_data, doc_processor, oss_service):
                 logger.info(f"已替换 {len(oss_urls_ordered) or len(url_mapping)} 个图片URL为OSS地址")
             
             # 提取并上传Word文档中的图片
+            # 注意：部分分支会在前面清理临时 docx，若路径不存在则跳过，避免整封邮件失败。
             if docx_path:
-                images = doc_processor.extract_images_from_docx(docx_path)
-                
-                for img_filename, img_data in images:
-                    try:
-                        # 上传到OSS
-                        oss_url, oss_key = oss_service.upload_file(
-                            file_data=img_data,
-                            filename=img_filename,
-                            folder=f"submissions/{submission.id}"
-                        )
-                        
-                        # 记录图片信息
-                        await submission_service.add_image(
-                            submission_id=submission.id,
-                            oss_url=oss_url,
-                            oss_key=oss_key,
-                            original_filename=img_filename,
-                            file_size=len(img_data)
-                        )
+                if os.path.exists(docx_path):
+                    images = doc_processor.extract_images_from_docx(docx_path)
                     
-                    except Exception as e:
-                        logger.error(f"上传图片失败: {str(e)}")
-                        continue
+                    for img_filename, img_data in images:
+                        try:
+                            # 上传到OSS
+                            oss_url, oss_key = oss_service.upload_file(
+                                file_data=img_data,
+                                filename=img_filename,
+                                folder=f"submissions/{submission.id}"
+                            )
+                            
+                            # 记录图片信息
+                            await submission_service.add_image(
+                                submission_id=submission.id,
+                                oss_url=oss_url,
+                                oss_key=oss_key,
+                                original_filename=img_filename,
+                                file_size=len(img_data)
+                            )
+                        
+                        except Exception as e:
+                            logger.error(f"上传图片失败: {str(e)}")
+                            continue
+                else:
+                    logger.warning(f"跳过Word图片提取，文件不存在: {docx_path}")
+
+            # Word分支：图片提取完成后再清理临时文件
+            if content_type == ContentType.WORD:
+                if doc_path and os.path.exists(doc_path):
+                    os.unlink(doc_path)
+                    logger.info(f"已清理Word临时源文件: {doc_path}")
+                if docx_path and os.path.exists(docx_path) and docx_path != doc_path:
+                    os.unlink(docx_path)
+                    logger.info(f"已清理Word临时docx文件: {docx_path}")
             
             # 创建原文草稿（供编辑人员查看和手动编辑）
             from app.services.draft_service import DraftService
