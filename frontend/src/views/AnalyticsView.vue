@@ -16,6 +16,14 @@
           />
         </el-form-item>
         <el-form-item>
+          <el-button-group>
+            <el-button size="small" @click="setToday">今天</el-button>
+            <el-button size="small" @click="setYesterday">昨天</el-button>
+            <el-button size="small" @click="setLast7Days">7天</el-button>
+            <el-button size="small" @click="setThisMonth">本月</el-button>
+          </el-button-group>
+        </el-form-item>
+        <el-form-item>
           <el-button type="primary" @click="loadData">查询</el-button>
           <el-button @click="resetDate">重置</el-button>
         </el-form-item>
@@ -290,6 +298,41 @@ const resetDate = () => {
   loadData()
 }
 
+const formatDate = (date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const setToday = () => {
+  const today = new Date()
+  dateRange.value = [formatDate(today), formatDate(today)]
+  loadData()
+}
+
+const setYesterday = () => {
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  dateRange.value = [formatDate(yesterday), formatDate(yesterday)]
+  loadData()
+}
+
+const setLast7Days = () => {
+  const today = new Date()
+  const last7Days = new Date()
+  last7Days.setDate(last7Days.getDate() - 6)
+  dateRange.value = [formatDate(last7Days), formatDate(today)]
+  loadData()
+}
+
+const setThisMonth = () => {
+  const today = new Date()
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
+  dateRange.value = [formatDate(firstDay), formatDate(today)]
+  loadData()
+}
+
 const scrollTo = (id) => {
   const element = document.getElementById(id)
   if (element) {
@@ -298,7 +341,8 @@ const scrollTo = (id) => {
 }
 
 onMounted(() => {
-  loadData()
+  // 默认显示今天
+  setToday()
 })
 </script>
 
