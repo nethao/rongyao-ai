@@ -4,7 +4,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional
 from app.database import get_db
 from app.models.user import User
@@ -26,10 +26,10 @@ async def get_overview(
     
     if start_date:
         where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
-        params["start_date"] = start_date
+        params["start_date"] = datetime.strptime(start_date, "%Y-%m-%d").date()
     if end_date:
         where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
-        params["end_date"] = end_date
+        params["end_date"] = datetime.strptime(end_date, "%Y-%m-%d").date()
     
     result = await db.execute(
         text(f"""
@@ -68,10 +68,10 @@ async def get_trends(
     
     if start_date:
         where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
-        params["start_date"] = start_date
+        params["start_date"] = datetime.strptime(start_date, "%Y-%m-%d").date()
     if end_date:
         where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
-        params["end_date"] = end_date
+        params["end_date"] = datetime.strptime(end_date, "%Y-%m-%d").date()
     
     result = await db.execute(
         text(f"""
@@ -118,10 +118,10 @@ async def get_editor_stats(
     
     if start_date:
         where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
-        params["start_date"] = start_date
+        params["start_date"] = datetime.strptime(start_date, "%Y-%m-%d").date()
     if end_date:
         where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
-        params["end_date"] = end_date
+        params["end_date"] = datetime.strptime(end_date, "%Y-%m-%d").date()
     
     result = await db.execute(
         text(f"""
@@ -173,10 +173,10 @@ async def get_media_stats(
     
     if start_date:
         where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
-        params["start_date"] = start_date
+        params["start_date"] = datetime.strptime(start_date, "%Y-%m-%d").date()
     if end_date:
         where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
-        params["end_date"] = end_date
+        params["end_date"] = datetime.strptime(end_date, "%Y-%m-%d").date()
     
     result = await db.execute(
         text(f"""
@@ -222,10 +222,10 @@ async def get_unit_stats(
     
     if start_date:
         where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
-        params["start_date"] = start_date
+        params["start_date"] = datetime.strptime(start_date, "%Y-%m-%d").date()
     if end_date:
         where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
-        params["end_date"] = end_date
+        params["end_date"] = datetime.strptime(end_date, "%Y-%m-%d").date()
     
     result = await db.execute(
         text(f"""
@@ -271,10 +271,10 @@ async def get_user_stats(
     
     if start_date:
         where_clause += " AND ph.CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
-        params["start_date"] = start_date
+        params["start_date"] = datetime.strptime(start_date, "%Y-%m-%d").date()
     if end_date:
         where_clause += " AND ph.CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
-        params["end_date"] = end_date
+        params["end_date"] = datetime.strptime(end_date, "%Y-%m-%d").date()
     
     result = await db.execute(
         text(f"""
@@ -319,10 +319,10 @@ async def get_site_stats(
     
     if start_date:
         where_clause += " AND ph.CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
-        params["start_date"] = start_date
+        params["start_date"] = datetime.strptime(start_date, "%Y-%m-%d").date()
     if end_date:
         where_clause += " AND ph.CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
-        params["end_date"] = end_date
+        params["end_date"] = datetime.strptime(end_date, "%Y-%m-%d").date()
     
     result = await db.execute(
         text(f"""
@@ -367,10 +367,10 @@ async def get_source_stats(
     
     if start_date:
         where_clause += " AND CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
-        params["start_date"] = start_date
+        params["start_date"] = datetime.strptime(start_date, "%Y-%m-%d").date()
     if end_date:
         where_clause += " AND CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
-        params["end_date"] = end_date
+        params["end_date"] = datetime.strptime(end_date, "%Y-%m-%d").date()
     
     result = await db.execute(
         text(f"""
