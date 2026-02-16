@@ -275,12 +275,23 @@ class PublishService:
         
         history = []
         for row in result:
+            # 将UTC时间转换为北京时间
+            created_at = row.created_at
+            if created_at:
+                from datetime import timezone, timedelta
+                # 假设数据库存的是UTC时间，转换为北京时间（UTC+8）
+                beijing_tz = timezone(timedelta(hours=8))
+                if created_at.tzinfo is None:
+                    # 如果没有时区信息，假设是UTC
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                created_at = created_at.astimezone(beijing_tz)
+            
             history.append({
                 "id": row.id,
                 "wordpress_post_id": row.wordpress_post_id,
                 "status": row.status,
                 "message": row.message,
-                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "created_at": created_at.isoformat() if created_at else None,
                 "site_name": row.site_name,
                 "site_url": row.site_url
             })
