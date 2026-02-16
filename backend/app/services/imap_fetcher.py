@@ -114,9 +114,9 @@ class IMAPFetcher:
         
         try:
             with self.connect() as mailbox:
-                # 获取未读邮件
+                # 获取未读邮件（使用UNSEEN标准IMAP搜索条件）
                 messages = mailbox.fetch(
-                    criteria=AND(seen=False),
+                    criteria='UNSEEN',
                     limit=limit,
                     reverse=True  # 最新的邮件优先
                 )
