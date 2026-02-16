@@ -182,37 +182,51 @@ async def process_email(email_data, doc_processor, oss_service):
             
             elif content_type == ContentType.WORD:
                 # 处理Word文档附件
-                for filename, file_data in email_data.attachments:
-                    # 保存附件到临时文件
-                    temp_file = tempfile.NamedTemporaryFile(
-                        delete=False,
-                        suffix=os.path.splitext(filename)[1]
-                    )
-                    temp_file.write(file_data)
-                    temp_file.close()
-                    
-                    # 处理Word文档
-                    if filename.lower().endswith('.doc'):
-                        doc_path = temp_file.name
-                        # 转换为docx
-                        docx_path = doc_processor.convert_doc_to_docx(doc_path)
-                        # 先提取标题
-                        doc_title, title_lines = doc_processor.extract_title_from_docx(docx_path)
-                        if doc_title and doc_title != "无标题":
-                            title = doc_title
-                            logger.info(f"从Word文档提取标题: {title}, 占用{title_lines}行")
-                        # 提取文本时跳过标题行
-                        content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
-                    
-                    elif filename.lower().endswith('.docx'):
-                        docx_path = temp_file.name
-                        # 先提取标题
-                        doc_title, title_lines = doc_processor.extract_title_from_docx(docx_path)
-                        if doc_title and doc_title != "无标题":
-                            title = doc_title
-                            logger.info(f"从Word文档提取标题: {title}, 占用{title_lines}行")
-                        # 提取文本时跳过标题行
-                        content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
+                temp_file_path = None
+                docx_path_to_clean = None
+                
+                try:
+                    for filename, file_data in email_data.attachments:
+                        # 保存附件到临时文件
+                        temp_file = tempfile.NamedTemporaryFile(
+                            delete=False,
+                            suffix=os.path.splitext(filename)[1]
+                        )
+                        temp_file.write(file_data)
+                        temp_file.close()
+                        temp_file_path = temp_file.name
+                        
+                        # 处理Word文档
+                        if filename.lower().endswith('.doc'):
+                            doc_path = temp_file_path
+                            # 转换为docx
+                            docx_path = doc_processor.convert_doc_to_docx(doc_path)
+                            docx_path_to_clean = docx_path
+                            # 先提取标题
+                            doc_title, title_lines = doc_processor.extract_title_from_docx(docx_path)
+                            if doc_title and doc_title != "无标题":
+                                title = doc_title
+                                logger.info(f"从Word文档提取标题: {title}, 占用{title_lines}行")
+                            # 提取文本时跳过标题行
+                            content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
+                        
+                        elif filename.lower().endswith('.docx'):
+                            docx_path = temp_file_path
+                            # 先提取标题
+                            doc_title, title_lines = doc_processor.extract_title_from_docx(docx_path)
+                            if doc_title and doc_title != "无标题":
+                                title = doc_title
+                                logger.info(f"从Word文档提取标题: {title}, 占用{title_lines}行")
+                            # 提取文本时跳过标题行
+                            content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
+                finally:
+                    # 清理临时文件
+                    if temp_file_path and os.path.exists(temp_file_path):
+                        os.unlink(temp_file_path)
+                        logger.info(f"已清理临时文件: {temp_file_path}")
+                    if docx_path_to_clean and os.path.exists(docx_path_to_clean) and docx_path_to_clean != temp_file_path:
+                        os.unlink(docx_path_to_clean)
+                        logger.info(f"已清理转换后的docx文件: {docx_path_to_clean}")
             
             elif content_type == ContentType.ARCHIVE:
                 # 处理压缩包 - 解压并处理Word+图片
