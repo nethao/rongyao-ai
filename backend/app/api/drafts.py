@@ -268,7 +268,8 @@ async def publish_draft(
     success, post_id, error_msg, site_name = await publish_service.publish_draft(
         draft_id=draft_id,
         site_id=publish_request.site_id,
-        status="publish"
+        status="publish",
+        author_id=current_user.wp_author_id  # 使用当前用户的WP作者ID
     )
     
     if success:

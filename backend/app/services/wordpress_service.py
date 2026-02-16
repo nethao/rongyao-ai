@@ -70,7 +70,8 @@ class WordPressService:
         content: str,
         status: str = "draft",
         categories: Optional[list[int]] = None,
-        tags: Optional[list[int]] = None
+        tags: Optional[list[int]] = None,
+        author_id: Optional[int] = None
     ) -> tuple[bool, Optional[int], Optional[str]]:
         """
         创建WordPress文章
@@ -81,6 +82,7 @@ class WordPressService:
             status: 文章状态 ('draft', 'publish', 'pending')
             categories: 分类ID列表
             tags: 标签ID列表
+            author_id: 作者ID（WordPress用户ID）
             
         Returns:
             (是否成功, 文章ID, 错误信息)
@@ -96,6 +98,8 @@ class WordPressService:
                 post_data["categories"] = categories
             if tags:
                 post_data["tags"] = tags
+            if author_id:
+                post_data["author"] = author_id
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(

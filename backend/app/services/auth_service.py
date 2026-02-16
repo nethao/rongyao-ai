@@ -149,13 +149,19 @@ class AuthService:
         users = result.scalars().all()
         return users, total
 
-    async def update_user(self, user_id: int, role: str) -> Optional[User]:
+    async def update_user(
+        self, 
+        user_id: int, 
+        role: str,
+        wp_author_id: Optional[int] = None
+    ) -> Optional[User]:
         """
-        更新用户角色
+        更新用户信息
 
         Args:
             user_id: 用户ID
             role: 新角色（admin 或 editor）
+            wp_author_id: WordPress作者ID（可选）
 
         Returns:
             更新后的用户，不存在则返回 None
@@ -166,6 +172,8 @@ class AuthService:
         if not user:
             return None
         user.role = role
+        if wp_author_id is not None:
+            user.wp_author_id = wp_author_id
         await self.db.commit()
         await self.db.refresh(user)
         return user

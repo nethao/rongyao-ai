@@ -94,7 +94,8 @@ class PublishService:
         self,
         draft_id: int,
         site_id: int,
-        status: str = "publish"
+        status: str = "publish",
+        author_id: Optional[int] = None
     ) -> tuple[bool, Optional[int], Optional[str], Optional[str]]:
         """
         发布草稿到WordPress站点
@@ -103,6 +104,7 @@ class PublishService:
             draft_id: 草稿ID
             site_id: 目标站点ID
             status: 发布状态 ('draft', 'publish', 'pending')
+            author_id: WordPress作者ID（可选）
             
         Returns:
             (是否成功, WordPress文章ID, 错误信息, 站点名称)
@@ -169,7 +171,8 @@ class PublishService:
         success, post_id, error_msg = await wp_service.create_post(
             title=title,
             content=content_html,
-            status=status
+            status=status,
+            author_id=author_id
         )
         
         # 记录发布历史
