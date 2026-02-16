@@ -61,11 +61,10 @@ async def preview_content(
                 raise HTTPException(status_code=400, detail="无法从链接获取文章内容，请检查链接是否正确")
             
             title = fetched_title or "无标题"
-            content = fetched_content
             original_html = fetched_html
             content_source = "weixin"
             
-            # 下载并上传图片
+            # 下载并上传图片，构建media_map
             for idx, img_url in enumerate(image_urls):
                 try:
                     img_data = fetcher.download_image(img_url)
@@ -81,6 +80,15 @@ async def preview_content(
                 except Exception as e:
                     logger.error(f"预览上传图片失败 {idx}: {e}")
             
+            # 将Markdown图片语法替换为占位符
+            import re
+            content = fetched_content
+            for idx in range(len(image_urls)):
+                # 匹配 ![图片N](url) 格式
+                pattern = rf'!\[图片{idx+1}\]\([^)]+\)'
+                replacement = f'[[IMG_{idx}]]'
+                content = re.sub(pattern, replacement, content)
+            
             image_count = len(media_map)
         
         elif article_type == "meipian":
@@ -95,11 +103,10 @@ async def preview_content(
                 raise HTTPException(status_code=400, detail="无法从链接获取文章内容，请检查链接是否正确")
             
             title = fetched_title or "无标题"
-            content = fetched_content
             original_html = fetched_html
             content_source = "meipian"
             
-            # 下载并上传图片
+            # 下载并上传图片，构建media_map
             for idx, img_url in enumerate(image_urls):
                 try:
                     img_data = fetcher.download_image(img_url)
@@ -114,6 +121,16 @@ async def preview_content(
                         logger.info(f"预览上传图片 {idx}: {oss_url}")
                 except Exception as e:
                     logger.error(f"预览上传图片失败 {idx}: {e}")
+            
+            # 将Markdown图片语法替换为占位符
+            import re
+            content = fetched_content
+            img_pattern = re.compile(r'!\[[^\]]*\]\([^)]+\)')
+            matches = list(img_pattern.finditer(content))
+            # 从后往前替换，避免位置偏移
+            for idx in range(len(matches) - 1, -1, -1):
+                match = matches[idx]
+                content = content[:match.start()] + f'[[IMG_{idx}]]' + content[match.end():]
             
             image_count = len(media_map)
         
