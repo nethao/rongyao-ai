@@ -122,15 +122,24 @@ async def preview_content(
                 except Exception as e:
                     logger.error(f"预览上传图片失败 {idx}: {e}")
             
-            # 将Markdown图片语法替换为占位符
-            import re
-            content = fetched_content
-            img_pattern = re.compile(r'!\[[^\]]*\]\([^)]+\)')
-            matches = list(img_pattern.finditer(content))
-            # 从后往前替换，避免位置偏移
-            for idx in range(len(matches) - 1, -1, -1):
-                match = matches[idx]
-                content = content[:match.start()] + f'[[IMG_{idx}]]' + content[match.end():]
+            # 美篇返回纯文本，需要从HTML中提取图片位置并插入占位符
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(fetched_html, 'html.parser')
+            
+            # 在HTML中将图片替换为占位符
+            img_tags = soup.find_all('img')
+            img_idx = 0
+            for img in img_tags:
+                # 跳过图标等小图
+                img_url = img.get('data-src') or img.get('src')
+                if img_url and img_url in image_urls:
+                    # 用占位符替换img标签
+                    placeholder_text = f"\n\n[[IMG_{img_idx}]]\n\n"
+                    img.replace_with(placeholder_text)
+                    img_idx += 1
+            
+            # 提取带占位符的文本
+            content = soup.get_text(separator='\n', strip=True)
             
             image_count = len(media_map)
         
