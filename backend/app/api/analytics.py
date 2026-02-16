@@ -270,10 +270,10 @@ async def get_user_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND ph.CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
+        where_clause += " AND CAST(ph.created_at AS DATE) >= CAST(:start_date AS DATE)"
         params["start_date"] = datetime.strptime(start_date, "%Y-%m-%d").date()
     if end_date:
-        where_clause += " AND ph.CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
+        where_clause += " AND CAST(ph.created_at AS DATE) <= CAST(:end_date AS DATE)"
         params["end_date"] = datetime.strptime(end_date, "%Y-%m-%d").date()
     
     result = await db.execute(
@@ -318,10 +318,10 @@ async def get_site_stats(
     params = {}
     
     if start_date:
-        where_clause += " AND ph.CAST(created_at AS DATE) >= CAST(:start_date AS DATE)"
+        where_clause += " AND CAST(ph.created_at AS DATE) >= CAST(:start_date AS DATE)"
         params["start_date"] = datetime.strptime(start_date, "%Y-%m-%d").date()
     if end_date:
-        where_clause += " AND ph.CAST(created_at AS DATE) <= CAST(:end_date AS DATE)"
+        where_clause += " AND CAST(ph.created_at AS DATE) <= CAST(:end_date AS DATE)"
         params["end_date"] = datetime.strptime(end_date, "%Y-%m-%d").date()
     
     result = await db.execute(

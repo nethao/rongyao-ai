@@ -28,7 +28,7 @@ const getToken = () => localStorage.getItem('access_token')
 
 ## 问题2：SQL日期参数类型错误 (500 Internal Server Error)
 
-**时间**：2026-02-17 04:38 - 04:43
+**时间**：2026-02-17 04:38 - 04:48
 
 **现象**：
 ```
@@ -37,7 +37,8 @@ sqlalchemy.exc.DBAPIError: invalid input for query argument $1: '2026-02-17'
 ```
 
 **原因**：
-PostgreSQL的asyncpg驱动要求日期参数必须是Python的`date`对象，不能是字符串。
+1. PostgreSQL的asyncpg驱动要求日期参数必须是Python的`date`对象，不能是字符串
+2. SQL语法错误：`ph.CAST(created_at AS DATE)` 应为 `CAST(ph.created_at AS DATE)`
 
 **尝试的方案**：
 1. ❌ 使用`DATE(created_at)`函数 - 参数仍是字符串
@@ -45,7 +46,7 @@ PostgreSQL的asyncpg驱动要求日期参数必须是Python的`date`对象，不
 3. ❌ 使用`CAST(created_at AS DATE)`但参数仍是字符串 - 类型不匹配
 
 **最终解决方案**：
-在Python后端将字符串转换为date对象
+1. 在Python后端将字符串转换为date对象
 ```python
 from datetime import datetime, date
 
@@ -56,10 +57,18 @@ if end_date:
     params["end_date"] = datetime.strptime(end_date, "%Y-%m-%d").date()
 ```
 
-**SQL查询**：
+2. 修复SQL语法错误
 ```sql
-WHERE CAST(created_at AS DATE) >= :start_date
+-- 错误
+WHERE ph.CAST(created_at AS DATE) >= :start_date
+
+-- 正确
+WHERE CAST(ph.created_at AS DATE) >= :start_date
 ```
+
+**影响的端点**：
+- `/api/analytics/sites` ✅ 已修复
+- `/api/analytics/users` ✅ 已修复
 
 **文件**：`backend/app/api/analytics.py`
 
@@ -67,6 +76,7 @@ WHERE CAST(created_at AS DATE) >= :start_date
 - asyncpg驱动对类型要求严格
 - 字符串参数无法自动转换为date类型
 - 必须在Python层面转换类型
+- CAST函数语法：`CAST(column AS TYPE)` 不是 `table.CAST(column AS TYPE)`
 
 ---
 
