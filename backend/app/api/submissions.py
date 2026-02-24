@@ -14,7 +14,7 @@ from app.models.user import User
 from app.models.submission import Submission
 from app.models.task_log import TaskLog
 from app.schemas.submission import SubmissionSchema, SubmissionListResponse, ManualSubmissionCreate, ContentPreviewResponse, ManualSubmissionCreateFromPreview
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, require_admin
 from app.tasks.transform_tasks import transform_content_task
 from sqlalchemy import desc
 
@@ -144,12 +144,12 @@ async def preview_content(
             image_count = len(media_map)
         
         elif article_type == "word":
-            # 处理Word文档
             if not word_file:
                 raise HTTPException(status_code=400, detail="Word类型需要上传文件")
             
-            # 保存上传的文件到临时目录
             suffix = os.path.splitext(word_file.filename)[1]
+            if suffix.lower() not in ('.doc', '.docx'):
+                raise HTTPException(status_code=400, detail="仅允许上传 .doc 或 .docx 文件")
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             try:
                 content_bytes = await word_file.read()
@@ -441,10 +441,10 @@ async def get_submission(
 async def delete_submission(
     submission_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """
-    删除投稿（同时删除关联的图片、草稿、OSS文件等）
+    删除投稿（同时删除关联的图片、草稿、OSS文件等），仅管理员可操作
     """
     from sqlalchemy.orm import selectinload
     from app.services.oss_service import OSSService

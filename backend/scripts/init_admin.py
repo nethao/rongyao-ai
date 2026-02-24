@@ -1,11 +1,12 @@
 """
 创建初始管理员账号脚本
+用法: ADMIN_PASSWORD=<strong-password> python scripts/init_admin.py [username]
 """
 import asyncio
+import os
 import sys
 from pathlib import Path
 
-# 添加项目根目录到Python路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy import select
@@ -15,35 +16,35 @@ from app.utils.auth import get_password_hash
 
 
 async def create_admin_user():
-    """创建初始管理员账号"""
-    # 初始化数据库
+    admin_username = sys.argv[1] if len(sys.argv) > 1 else "admin"
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+
+    if not admin_password or len(admin_password) < 8:
+        print("错误: 请通过环境变量 ADMIN_PASSWORD 设置至少 8 位的密码")
+        print("用法: ADMIN_PASSWORD=<密码> python scripts/init_admin.py [用户名]")
+        sys.exit(1)
+
     await init_db()
-    
+
     async with AsyncSessionLocal() as session:
-        # 检查是否已存在管理员
         result = await session.execute(
-            select(User).where(User.username == "admin")
+            select(User).where(User.username == admin_username)
         )
         existing_admin = result.scalar_one_or_none()
-        
+
         if existing_admin:
-            print("管理员账号已存在")
+            print(f"管理员账号 '{admin_username}' 已存在")
             return
-        
-        # 创建管理员账号
+
         admin_user = User(
-            username="admin",
-            password_hash=get_password_hash("admin123"),  # 默认密码，生产环境需修改
+            username=admin_username,
+            password_hash=get_password_hash(admin_password),
             role="admin"
         )
-        
         session.add(admin_user)
         await session.commit()
-        
-        print("✓ 管理员账号创建成功")
-        print("  用户名: admin")
-        print("  密码: admin123")
-        print("  ⚠️  请在生产环境中修改默认密码！")
+
+        print(f"管理员账号创建成功: {admin_username}")
 
 
 if __name__ == "__main__":

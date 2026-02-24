@@ -1,20 +1,14 @@
-# 使用Node.js官方镜像
-FROM node:20-alpine
-
-# 设置工作目录
+# Stage 1: Build
+FROM node:20-alpine AS builder
 WORKDIR /app
-
-# 复制package文件
 COPY frontend/package*.json ./
-
-# 安装依赖
-RUN npm install
-
-# 复制应用代码
+RUN npm ci
 COPY frontend/ .
+RUN npm run build
 
-# 暴露端口
+# Stage 2: Production
+FROM nginx:stable-alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY docker/frontend/nginx-frontend.conf /etc/nginx/conf.d/default.conf
 EXPOSE 3000
-
-# 启动命令
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+CMD ["nginx", "-g", "daemon off;"]

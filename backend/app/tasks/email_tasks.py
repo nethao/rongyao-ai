@@ -260,6 +260,16 @@ async def process_email(email_data, doc_processor, oss_service):
                         extract_dir = _tf.mkdtemp()
                         try:
                             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                                for member in zip_ref.infolist():
+                                    target = os.path.realpath(
+                                        os.path.join(extract_dir, member.filename)
+                                    )
+                                    if not target.startswith(
+                                        os.path.realpath(extract_dir) + os.sep
+                                    ) and target != os.path.realpath(extract_dir):
+                                        raise ValueError(
+                                            f"Zip Slip 检测到恶意路径: {member.filename}"
+                                        )
                                 zip_ref.extractall(extract_dir)
                             logger.info(f"压缩包已解压到: {extract_dir}")
                             

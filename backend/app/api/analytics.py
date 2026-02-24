@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, date
 from typing import Optional
 from app.database import get_db
 from app.models.user import User
-from app.api.auth import get_current_user
+from app.api.dependencies import require_admin
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -18,7 +18,7 @@ async def get_overview(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """获取概览统计"""
     where_clause = "WHERE 1=1"
@@ -60,7 +60,7 @@ async def get_trends(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """获取投稿趋势统计"""
     where_clause = "WHERE 1=1"
@@ -110,7 +110,7 @@ async def get_editor_stats(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """获取采编投稿统计"""
     where_clause = "WHERE email_from IS NOT NULL"
@@ -165,7 +165,7 @@ async def get_media_stats(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """获取媒体类型统计"""
     where_clause = "WHERE media_type IS NOT NULL"
@@ -214,7 +214,7 @@ async def get_unit_stats(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """获取来稿单位统计"""
     where_clause = "WHERE source_unit IS NOT NULL"
@@ -263,7 +263,7 @@ async def get_user_stats(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """获取编辑人员统计"""
     where_clause = "WHERE 1=1"
@@ -311,7 +311,7 @@ async def get_site_stats(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """获取站点发布统计"""
     where_clause = "WHERE 1=1"
@@ -359,7 +359,7 @@ async def get_source_stats(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
     """获取内容来源统计"""
     where_clause = "WHERE content_source IS NOT NULL"

@@ -2,13 +2,42 @@
 网页抓取服务
 抓取公众号和美篇文章内容
 """
+import ipaddress
 import re
+import socket
+from urllib.parse import urlparse
 import requests
 from typing import Optional, Tuple, List
 from bs4 import BeautifulSoup
 import logging
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_URL_HOSTS = {
+    "mp.weixin.qq.com",
+    "www.meipian.cn",
+    "meipian.cn",
+}
+
+
+def _validate_url(url: str) -> None:
+    """SSRF 防护：仅允许白名单域名且禁止解析到内网 IP"""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"不允许的 URL 协议: {parsed.scheme}")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("URL 缺少主机名")
+    if host not in ALLOWED_URL_HOSTS:
+        raise ValueError(f"不允许抓取的域名: {host}")
+    try:
+        resolved = socket.getaddrinfo(host, None)
+        for _, _, _, _, addr in resolved:
+            ip = ipaddress.ip_address(addr[0])
+            if ip.is_private or ip.is_loopback or ip.is_reserved:
+                raise ValueError(f"目标域名解析到内网地址: {ip}")
+    except socket.gaierror:
+        raise ValueError(f"域名解析失败: {host}")
 
 
 class WebFetcher:
@@ -22,6 +51,7 @@ class WebFetcher:
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             'Referer': 'https://mp.weixin.qq.com/',
         })
+        self.session.max_redirects = 3
     
     def fetch_weixin_article(self, url: str) -> Tuple[Optional[str], Optional[str], Optional[str], List[str]]:
         """
@@ -34,6 +64,7 @@ class WebFetcher:
             (标题, Markdown内容, 原始HTML, 图片URL列表)
         """
         try:
+            _validate_url(url)
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
             response.encoding = 'utf-8'
@@ -102,6 +133,7 @@ class WebFetcher:
             (标题, 内容文本, 图片URL列表, 原始HTML)
         """
         try:
+            _validate_url(url)
             from playwright.async_api import async_playwright
             
             async with async_playwright() as p:

@@ -1,28 +1,26 @@
 """
 加密工具函数
+使用独立的 ENCRYPTION_KEY 进行 Fernet 加解密，与 JWT 签名密钥完全分离。
 """
-from cryptography.fernet import Fernet
+import logging
+from cryptography.fernet import Fernet, InvalidToken
 from app.config import settings
-import base64
-import hashlib
+
+logger = logging.getLogger(__name__)
 
 
 def get_encryption_key() -> bytes:
     """
-    从JWT密钥派生加密密钥
+    从独立的 ENCRYPTION_KEY 获取 Fernet 密钥。
+    ENCRYPTION_KEY 必须是 url-safe base64 编码的 32 字节密钥。
     """
-    # 使用JWT密钥生成32字节的密钥
-    key = hashlib.sha256(settings.JWT_SECRET_KEY.encode()).digest()
-    return base64.urlsafe_b64encode(key)
+    return settings.ENCRYPTION_KEY.encode()
 
 
 def encrypt_value(value: str) -> str:
-    """
-    加密字符串值
-    """
+    """加密字符串值"""
     if not value:
         return value
-    
     fernet = Fernet(get_encryption_key())
     encrypted = fernet.encrypt(value.encode())
     return encrypted.decode()
@@ -30,15 +28,15 @@ def encrypt_value(value: str) -> str:
 
 def decrypt_value(encrypted_value: str) -> str:
     """
-    解密字符串值
+    解密字符串值。
+    解密失败时抛出异常，不再静默返回密文。
     """
     if not encrypted_value:
         return encrypted_value
-    
     try:
         fernet = Fernet(get_encryption_key())
         decrypted = fernet.decrypt(encrypted_value.encode())
         return decrypted.decode()
-    except Exception:
-        # 解密失败返回原值
-        return encrypted_value
+    except (InvalidToken, Exception) as e:
+        logger.error(f"解密失败: {type(e).__name__}")
+        raise ValueError("数据解密失败，请检查 ENCRYPTION_KEY 是否正确") from e
