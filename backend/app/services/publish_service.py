@@ -194,19 +194,20 @@ class PublishService:
             author_id=author_id
         )
         
-        # 记录发布历史
+        # 记录发布历史（含发布人，用于文编工作量统计）
         from sqlalchemy import text
         await self.db.execute(
             text("""
-                INSERT INTO publish_history (draft_id, site_id, wordpress_post_id, status, message)
-                VALUES (:draft_id, :site_id, :post_id, :status, :message)
+                INSERT INTO publish_history (draft_id, site_id, wordpress_post_id, status, message, publisher_user_id)
+                VALUES (:draft_id, :site_id, :post_id, :status, :message, :publisher_user_id)
             """),
             {
                 "draft_id": draft_id,
                 "site_id": site_id,
                 "post_id": post_id,
                 "status": "success" if success else "failed",
-                "message": error_msg if not success else f"成功发布到 {site.name}"
+                "message": error_msg if not success else f"成功发布到 {site.name}",
+                "publisher_user_id": publisher_user_id,
             }
         )
         

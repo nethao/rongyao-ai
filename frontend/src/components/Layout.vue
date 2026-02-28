@@ -15,10 +15,15 @@
             <el-icon><Document /></el-icon>
             投稿列表
           </el-menu-item>
-          <el-menu-item v-if="isAdmin" index="/analytics">
-            <el-icon><DataAnalysis /></el-icon>
-            数据分析
-          </el-menu-item>
+          <el-sub-menu v-if="isAdmin" index="analytics-menu">
+            <template #title>
+              <el-icon><DataAnalysis /></el-icon>
+              <span>数据分析</span>
+            </template>
+            <el-menu-item index="/analytics">数据分析</el-menu-item>
+            <el-menu-item index="/editor-workload">采编工作量</el-menu-item>
+            <el-menu-item index="/copy-editor-workload">文编工作量统计</el-menu-item>
+          </el-sub-menu>
           <el-menu-item v-if="isAdmin" index="/duplicate-logs">
             <el-icon><DocumentCopy /></el-icon>
             重复稿件
@@ -102,6 +107,12 @@ const activeMenu = computed(() => {
   }
   if (path.startsWith('/analytics')) {
     return '/analytics'
+  }
+  if (path.startsWith('/editor-workload')) {
+    return '/editor-workload'
+  }
+  if (path.startsWith('/copy-editor-workload')) {
+    return '/copy-editor-workload'
   }
   if (path.startsWith('/duplicate-logs')) {
     return '/duplicate-logs'

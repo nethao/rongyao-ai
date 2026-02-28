@@ -266,13 +266,12 @@
             <el-option
               v-for="site in wordpressSites"
               :key="site.id"
-              :label="site.name"
+              :label="`${site.name} (ID: ${site.id})`"
               :value="site.id"
             >
               <span>{{ site.name }}</span>
-              <span style="color: #8492a6; font-size: 12px; margin-left: 10px">
-                {{ site.url }}
-              </span>
+              <span style="color: #8492a6; font-size: 12px; margin-left: 10px">ID: {{ site.id }}</span>
+              <span style="color: #8492a6; font-size: 12px; margin-left: 8px">{{ site.url }}</span>
             </el-option>
           </el-select>
         </el-form-item>

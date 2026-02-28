@@ -74,21 +74,31 @@ class BylineService:
         获取用户在指定站点下的文编署名
         若未配置映射，则用用户的 display_name 或 username
         """
+        if not user_id or site_id is None:
+            logger.warning("文编署名: user_id 或 site_id 为空, user_id=%s site_id=%s", user_id, site_id)
+            return None
+        uid, sid = int(user_id), int(site_id)
         r = await self.db.execute(
             select(CopyEditorSiteMapping.display_name).where(
-                CopyEditorSiteMapping.user_id == user_id,
-                CopyEditorSiteMapping.site_id == site_id,
+                CopyEditorSiteMapping.user_id == uid,
+                CopyEditorSiteMapping.site_id == sid,
             ).limit(1)
         )
-        row = r.scalar_one_or_none()
-        if row:
-            return row
+        name = r.scalars().one_or_none()
+        if name and str(name).strip():
+            logger.info("文编署名: user_id=%s site_id=%s -> %s", uid, sid, name)
+            return str(name).strip()
         # 回退：用户 display_name 或 username
-        r = await self.db.execute(select(User).where(User.id == user_id).limit(1))
+        r = await self.db.execute(select(User).where(User.id == uid).limit(1))
         user = r.scalar_one_or_none()
+        fallback = None
         if user:
-            return (user.display_name and user.display_name.strip()) or user.username
-        return None
+            fallback = (user.display_name and user.display_name.strip()) or user.username
+        logger.warning(
+            "文编署名: 未找到映射 user_id=%s site_id=%s，使用回退=%s。请在个人中心为该站点配置文编署名。",
+            uid, sid, fallback
+        )
+        return fallback
 
     @staticmethod
     def append_bylines(content_html: str, editor_name: Optional[str], copy_editor_name: Optional[str]) -> str:

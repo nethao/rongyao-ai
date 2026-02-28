@@ -31,7 +31,12 @@
         style="margin-bottom: 16px"
       />
       <el-table :data="profile.copy_editor_mappings" v-loading="loading" stripe border>
-        <el-table-column prop="site_name" label="站点" width="180" />
+        <el-table-column label="站点" width="220">
+          <template #default="{ row }">
+            {{ row.site_name || '-' }}
+            <span style="color: #909399; font-size: 12px; margin-left: 6px">(ID: {{ row.site_id }})</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="display_name" label="文编署名" width="140" />
         <el-table-column label="操作" width="140">
           <template #default="{ row }">

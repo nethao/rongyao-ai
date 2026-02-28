@@ -2,7 +2,8 @@
   <div class="analytics-container">
     <el-card class="header-card">
       <h2>数据分析</h2>
-      
+      <p class="time-rule-tip">统计日期规则：当日 14:01 至次日 14:00 归为「次日」稿件（如 1月1日 14:01～1月2日 14:00 计为 1月2日）。</p>
+
       <!-- 时间筛选 -->
       <el-form :inline="true" style="margin-top: 20px;">
         <el-form-item label="时间范围">
@@ -71,7 +72,7 @@
 
       <!-- 快速入口 -->
       <el-row :gutter="20" style="margin-top: 20px;">
-        <el-col :span="8">
+        <el-col :span="6">
           <el-card shadow="hover" class="quick-link" @click="scrollTo('trends')">
             <div class="quick-link-content">
               <el-icon :size="32" color="#409eff"><TrendCharts /></el-icon>
@@ -82,18 +83,29 @@
             </div>
           </el-card>
         </el-col>
-        <el-col :span="8">
+        <el-col :span="6">
           <el-card shadow="hover" class="quick-link" @click="scrollTo('editors')">
             <div class="quick-link-content">
               <el-icon :size="32" color="#67c23a"><User /></el-icon>
               <div class="quick-link-text">
                 <div class="quick-link-title">采编统计</div>
-                <div class="quick-link-desc">查看采编投稿排行</div>
+                <div class="quick-link-desc">采编投稿排行（姓名/邮箱）</div>
               </div>
             </div>
           </el-card>
         </el-col>
-        <el-col :span="8">
+        <el-col :span="6">
+          <el-card shadow="hover" class="quick-link" @click="scrollTo('copy-editors')">
+            <div class="quick-link-content">
+              <el-icon :size="32" color="#909399"><EditPen /></el-icon>
+              <div class="quick-link-text">
+                <div class="quick-link-title">文编工作量</div>
+                <div class="quick-link-desc">按发布人统计发布量</div>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="6">
           <el-card shadow="hover" class="quick-link" @click="scrollTo('sites')">
             <div class="quick-link-content">
               <el-icon :size="32" color="#e6a23c"><Monitor /></el-icon>
@@ -125,13 +137,13 @@
       </el-table>
     </el-card>
 
-    <!-- 采编投稿统计 -->
+    <!-- 采编投稿统计（采编=来稿邮箱，显示名=后台姓名映射，无映射显示邮箱） -->
     <el-card id="editors" style="margin-top: 20px;">
       <template #header>
         <span>采编投稿统计</span>
       </template>
       <el-table :data="editors" stripe>
-        <el-table-column prop="editor" label="采编" width="150" />
+        <el-table-column prop="editor" label="采编" width="200" />
         <el-table-column prop="total" label="投稿数" width="100" />
         <el-table-column prop="pending" label="待处理" width="100" />
         <el-table-column prop="completed" label="已完成" width="100" />
@@ -149,13 +161,28 @@
       </el-table>
     </el-card>
 
+    <!-- 文编工作量统计（按发布人统计发布量，时间同 14:01～次日14:00 规则） -->
+    <el-card id="copy-editors" style="margin-top: 20px;">
+      <template #header>
+        <span>文编工作量统计</span>
+      </template>
+      <el-table :data="copyEditors" stripe>
+        <el-table-column prop="copy_editor" label="文编" width="180" />
+        <el-table-column prop="published" label="发布量" width="120" />
+      </el-table>
+    </el-card>
+
     <!-- 媒体类型统计 -->
     <el-card style="margin-top: 20px;">
       <template #header>
         <span>媒体类型统计</span>
       </template>
       <el-table :data="media" stripe>
-        <el-table-column prop="media_type" label="媒体" width="150" />
+        <el-table-column prop="media_type" label="媒体" width="150">
+          <template #default="{ row }">
+            {{ getMediaTypeLabel(row.media_type) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="total" label="投稿数" width="120" />
         <el-table-column prop="published" label="已发布" width="120" />
         <el-table-column prop="publish_rate" label="发布率" width="120">
@@ -207,7 +234,11 @@
         <span>内容来源统计</span>
       </template>
       <el-table :data="sources" stripe>
-        <el-table-column prop="source" label="来源类型" width="150" />
+        <el-table-column prop="source" label="来源类型" width="150">
+          <template #default="{ row }">
+            {{ getSourceLabel(row.source) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="total" label="数量" width="120" />
         <el-table-column prop="percentage" label="占比" width="120">
           <template #default="{ row }">
@@ -222,12 +253,13 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { TrendCharts, User, Monitor } from '@element-plus/icons-vue'
+import { TrendCharts, User, Monitor, EditPen } from '@element-plus/icons-vue'
 
 const dateRange = ref([])
 const overview = ref({ total: 0, pending: 0, completed: 0, published: 0 })
 const trends = ref([])
 const editors = ref([])
+const copyEditors = ref([])
 const media = ref([])
 const units = ref([])
 const sites = ref([])
@@ -265,7 +297,12 @@ const loadData = async () => {
     const editorsRes = await fetch(`/api/analytics/editors${queryString}`, { headers })
     if (!editorsRes.ok) throw new Error('加载采编统计失败')
     editors.value = await editorsRes.json()
-    
+
+    // 加载文编工作量统计
+    const copyEditorsRes = await fetch(`/api/analytics/copy-editors${queryString}`, { headers })
+    if (!copyEditorsRes.ok) throw new Error('加载文编工作量统计失败')
+    copyEditors.value = await copyEditorsRes.json()
+
     // 加载媒体统计
     const mediaRes = await fetch(`/api/analytics/media${queryString}`, { headers })
     if (!mediaRes.ok) throw new Error('加载媒体统计失败')
@@ -340,6 +377,42 @@ const scrollTo = (id) => {
   }
 }
 
+// 内容来源中文标签（与 AuditView 一致）
+const getSourceLabel = (source) => {
+  if (source == null || source === '') return '—'
+  const labels = {
+    weixin: '微信公众号',
+    meipian: '美篇',
+    doc: 'Word文档',
+    docx: 'Word文档',
+    video: '视频',
+    archive: '压缩包',
+    other_url: '其他链接',
+    large_attachment: '超大附件',
+    text: '纯文本'
+  }
+  return labels[source] || source
+}
+
+// 媒体类型中文标签（含与来源一致的 other_url 等）
+const getMediaTypeLabel = (mediaType) => {
+  if (mediaType == null || mediaType === '') return '—'
+  const labels = {
+    rongyao: '荣耀',
+    shidai: '时代',
+    zhengxian: '政贤',
+    zhengqi: '政气',
+    toutiao: '头条',
+    other_url: '其他链接',
+    weixin: '微信公众号',
+    meipian: '美篇',
+    doc: 'Word文档',
+    docx: 'Word文档',
+    text: '纯文本'
+  }
+  return labels[mediaType] || mediaType
+}
+
 onMounted(() => {
   // 默认显示今天
   setToday()
@@ -353,6 +426,12 @@ onMounted(() => {
 
 .header-card h2 {
   margin: 0;
+}
+
+.time-rule-tip {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #909399;
 }
 
 .quick-link {

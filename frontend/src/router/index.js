@@ -50,6 +50,30 @@ const router = createRouter({
           meta: { requiresAuth: true, requiresAdmin: true }
         },
         {
+          path: 'editor-workload',
+          name: 'editor-workload',
+          component: () => import('../views/EditorWorkloadView.vue'),
+          meta: { requiresAuth: true, requiresAdmin: true }
+        },
+        {
+          path: 'editor-workload/detail',
+          name: 'editor-workload-detail',
+          component: () => import('../views/EditorWorkloadDetailView.vue'),
+          meta: { requiresAuth: true, requiresAdmin: true }
+        },
+        {
+          path: 'copy-editor-workload',
+          name: 'copy-editor-workload',
+          component: () => import('../views/CopyEditorWorkloadView.vue'),
+          meta: { requiresAuth: true, requiresAdmin: true }
+        },
+        {
+          path: 'copy-editor-workload/detail',
+          name: 'copy-editor-workload-detail',
+          component: () => import('../views/CopyEditorWorkloadDetailView.vue'),
+          meta: { requiresAuth: true, requiresAdmin: true }
+        },
+        {
           path: 'duplicate-logs',
           name: 'duplicate-logs',
           component: () => import('../views/DuplicateLogsView.vue'),
