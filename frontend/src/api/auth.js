@@ -15,6 +15,16 @@ export function login(data) {
 }
 
 /**
+ * 获取验证码
+ */
+export function getCaptcha() {
+  return request({
+    url: '/auth/captcha',
+    method: 'get'
+  })
+}
+
+/**
  * 用户登出
  */
 export function logout() {

@@ -4,6 +4,7 @@ import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
   plugins: [vue()],
+  cacheDir: '.vite-cache',
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
@@ -11,10 +12,11 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    host: true,
     allowedHosts: ['e.com', 'a.com', 'b.com', 'c.com', 'd.com'],
     proxy: {
       '/api': {
-        target: 'http://backend:8000',
+        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
         changeOrigin: true
       }
     }

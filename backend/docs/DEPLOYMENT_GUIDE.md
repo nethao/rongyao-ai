@@ -11,6 +11,7 @@
 - Docker 20.10+
 - Docker Compose 2.0+
 - Linux操作系统（推荐Ubuntu 20.04+）
+- 处理RAR/7Z附件需系统依赖：`p7zip-full`、`unrar`（Docker部署已内置，重建镜像生效）
 
 ## 环境变量配置
 
@@ -54,6 +55,11 @@ IMAP_USE_SSL=true
 # 应用配置
 APP_ENV=production
 LOG_LEVEL=INFO
+
+# 数据清理配置
+IMAGE_COMPRESS_DAYS=365
+DATA_DELETE_DAYS=730
+ATTACHMENT_RETENTION_DAYS=15
 ```
 
 ## 部署步骤

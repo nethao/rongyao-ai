@@ -56,12 +56,24 @@ def fetch_emails_task():
             oss_service = OSSService()
             
             # 获取未读邮件
-            emails = fetcher.fetch_unread_emails(limit=10, mark_as_read=True)
+            emails = fetcher.fetch_unread_emails(limit=10, mark_as_read=True, fallback_recent_limit=0)
             logger.info(f"获取到 {len(emails)} 封未读邮件")
+            
+            # 批次内去重（基于邮件主题）
+            seen_subjects = set()
+            unique_emails = []
+            for email_data in emails:
+                if email_data.subject not in seen_subjects:
+                    seen_subjects.add(email_data.subject)
+                    unique_emails.append(email_data)
+                else:
+                    logger.info(f"批次内重复邮件，跳过: {email_data.subject}")
+            
+            logger.info(f"去重后剩余 {len(unique_emails)} 封邮件")
             
             # 处理每封邮件
             processed_count = 0
-            for email_data in emails:
+            for email_data in unique_emails:
                 try:
                     await process_email(email_data, doc_processor, oss_service)
                     processed_count += 1
@@ -124,6 +136,71 @@ async def process_email(email_data, doc_processor, oss_service):
         
         logger.info(f"邮件解析结果 - 合作方式:{cooperation}, 媒体:{media_type}, 单位:{source_unit}, 标题:{title}")
         
+        # 去重判断（早做判断，重复则不抓取内容）
+        from sqlalchemy import select
+        from app.models.submission import Submission
+        from app.models.duplicate_log import DuplicateLog
+        from app.services.email_parser import CooperationType
+        
+        # 1) 严格主题一致：沿用原逻辑
+        result = await db.execute(
+            select(Submission).where(Submission.email_subject == email_data.subject).limit(1)
+        )
+        if result.scalar_one_or_none():
+            logger.info(f"邮件已处理过（主题一致），跳过: {email_data.subject}")
+            return
+        
+        # 2) 同稿同媒体去重：需 source_unit、media_type、title 可解析
+        superseded_id = None  # 若当前邮件胜出并替换，记录被替换的旧稿 ID
+        if source_unit and media_type and title:
+            # 查询同媒体、同单位的投稿，逐一比对标题
+            r = await db.execute(
+                select(Submission).where(
+                    Submission.media_type == media_type.value if media_type else Submission.media_type,
+                    Submission.source_unit == source_unit
+                )
+            )
+            candidates = []
+            for s in r.scalars().all():
+                existing_title = EmailParser.extract_title_for_dedup(s.email_subject or "")
+                if existing_title and existing_title.strip() == title.strip():
+                    candidates.append(s)
+            
+            if candidates:
+                def _dedup_score(sub):
+                    """优先级：合作>投稿，新稿>旧稿。分数越小越优"""
+                    coop_rank = 0 if sub.cooperation_type == "partner" else 1
+                    ts = sub.email_date.timestamp() if sub.email_date else 0
+                    return (coop_rank, -ts)
+                
+                best = min(candidates, key=_dedup_score)
+                curr_rank = 0 if cooperation == CooperationType.PARTNER else 1
+                curr_ts = email_data.date.timestamp() if email_data.date else 0
+                curr_score = (curr_rank, -curr_ts)
+                best_score = _dedup_score(best)
+                
+                if curr_score < best_score:
+                    # 当前邮件胜出，将处理并替换旧稿
+                    superseded_id = best.id
+                    logger.info(f"同稿同媒体，当前邮件优于已有稿，将替换: 旧稿ID={best.id}, 主题={email_data.subject}")
+                else:
+                    # 已有稿胜出，跳过当前邮件，不抓取内容
+                    dup_log = DuplicateLog(
+                        email_subject=email_data.subject,
+                        email_from=email_data.from_addr,
+                        email_date=email_data.date,
+                        cooperation_type=cooperation.value if cooperation else None,
+                        media_type=media_type.value if media_type else None,
+                        source_unit=source_unit,
+                        title=title,
+                        duplicate_type="skipped",
+                        effective_submission_id=best.id,
+                    )
+                    db.add(dup_log)
+                    await db.commit()
+                    logger.info(f"重复稿件已跳过（不抓取内容）: {email_data.subject} -> 有效稿ID={best.id}")
+                    return
+        
         # 记录任务开始
         await submission_service.log_task(
             task_type="fetch_email",
@@ -141,7 +218,9 @@ async def process_email(email_data, doc_processor, oss_service):
             doc_path = None
             docx_path = None
             images_to_upload = []
+            image_urls = []
             original_html = None  # 保存原始HTML
+            attachment_records = []  # 待写入的附件记录（OSS已上传）
             
             # 根据内容类型处理
             if content_type == ContentType.WEIXIN:
@@ -186,28 +265,157 @@ async def process_email(email_data, doc_processor, oss_service):
                             if img_data:
                                 images_to_upload.append((f"meipian_image_{idx}.jpg", img_data))
             
-            elif content_type == ContentType.WORD:
+            elif content_type == ContentType.LARGE_ATTACHMENT:
+                # 超大附件：提取所有下载链接，由编辑人员手动下载
+                import re
+                import html as html_module
+                
+                # 提取所有 QQ 邮箱和网易邮箱的超大附件下载链接
+                qq_links = re.findall(r'https://wx\.mail\.qq\.com/ftn/download[^\s<>"\']+', email_data.body)
+                netease_links = re.findall(r'https://mail\.163\.com/large-attachment-download/[^\s<>"\']+', email_data.body)
+                
+                # HTML 解码链接（&amp; -> &）
+                qq_links = [html_module.unescape(link) for link in qq_links]
+                netease_links = [html_module.unescape(link) for link in netease_links]
+                
+                # 去重（保持顺序）
+                seen = set()
+                all_links = []
+                for link in qq_links + netease_links:
+                    if link not in seen:
+                        seen.add(link)
+                        all_links.append(link)
+                
+                if not all_links:
+                    logger.warning("未找到超大附件下载链接")
+                    content = email_data.body or ""
+                    original_html = f'<html><body><pre>{content}</pre></body></html>'
+                else:
+                    logger.info(f"检测到 {len(all_links)} 个超大附件下载链接")
+                    
+                    # 尝试提取文件名
+                    filenames = []
+                    for link in all_links:
+                        # 从 title 或链接文本提取文件名
+                        title_match = re.search(rf'title="([^"]+)"[^>]*>{re.escape(link)}', email_data.body)
+                        if title_match:
+                            filenames.append(title_match.group(1).split('\n')[0].strip())
+                        else:
+                            # 尝试从 URL 参数提取
+                            title_param = re.search(r'[?&]title=([^&]+)', link)
+                            if title_param:
+                                import urllib.parse
+                                filenames.append(urllib.parse.unquote(title_param.group(1)))
+                            else:
+                                filenames.append(f"附件 {len(filenames) + 1}")
+                    
+                    body_text = (email_data.body or "").strip()
+                    
+                    # 生成内容摘要
+                    content_lines = [f"超大附件 ({len(all_links)} 个)"]
+                    for i, (link, filename) in enumerate(zip(all_links, filenames), 1):
+                        content_lines.append(f"{i}. {filename}: {link}")
+                    content_lines.append(f"\n{body_text}")
+                    content = "\n".join(content_lines)
+                    
+                    # 生成原始内容预览 HTML
+                    download_items = []
+                    for i, (link, filename) in enumerate(zip(all_links, filenames), 1):
+                        download_items.append(
+                            f'<div class="download-item">'
+                            f'<p class="filename">📎 {i}. {filename}</p>'
+                            f'<p><a href="{link}" target="_blank">点击此处进入下载页面</a></p>'
+                            f'</div>'
+                        )
+                    
+                    original_html = (
+                        '<html><head><meta charset="utf-8">'
+                        '<style>body{font-family:sans-serif;padding:20px;} '
+                        'a{color:#409eff;font-size:16px;word-break:break-all;} '
+                        '.download-section{background:#fff3cd;padding:15px;border-left:4px solid #ffc107;margin:10px 0;} '
+                        '.download-item{margin:10px 0;padding:10px;background:#fff;border-radius:4px;} '
+                        '.download-item a{color:#e6a23c;font-weight:bold;font-size:16px;} '
+                        '.filename{color:#303133;font-size:14px;margin:5px 0;} '
+                        'pre{white-space:pre-wrap;word-break:break-all;color:#606266;font-size:13px;}</style></head>'
+                        '<body>'
+                        '<div class="download-section">'
+                        f'<p><strong>⚠️ 超大附件 ({len(all_links)} 个，请点击下载按钮手动下载）：</strong></p>'
+                        + ''.join(download_items) +
+                        '</div>'
+                        f'<hr><p><strong>邮件原文：</strong></p><pre>{body_text}</pre>'
+                        '</body></html>'
+                    )
+            
+            elif content_type == ContentType.OTHER_URL:
+                # 人工采集模式：只保存链接和邮件原文，不自动抓取网页内容
+                url = EmailParser.extract_url(email_data.body, ContentType.OTHER_URL)
+                url_line = f"链接: {url}" if url else ""
+                body_text = (email_data.body or "").strip()
+                content = "\n\n".join(filter(None, [url_line, body_text])) or url_line or ""
+
+                # 生成原始内容预览 HTML（供审核页左栏展示可点击链接）
+                if url:
+                    original_html = (
+                        '<html><head><meta charset="utf-8">'
+                        '<style>body{font-family:sans-serif;padding:20px;} '
+                        'a{color:#409eff;font-size:16px;word-break:break-all;} '
+                        'pre{white-space:pre-wrap;word-break:break-all;color:#606266;font-size:13px;}</style></head>'
+                        f'<body><p><strong>外部链接（请点击打开后手动复制内容）：</strong></p>'
+                        f'<p><a href="{url}" target="_blank">{url}</a></p>'
+                        f'<hr><p><strong>邮件原文：</strong></p><pre>{body_text}</pre></body></html>'
+                    )
+            
+            # Word 文档处理（包括超大附件下载成功后转换的）
+            if content_type == ContentType.WORD:
                 # 处理Word文档附件
                 logger.info("开始处理Word文档")
                 temp_file_path = None
                 docx_path_to_clean = None
+                word_attachment_images = []
                 
                 try:
                     logger.info(f"Word附件数量: {len(email_data.attachments)}")
                     for filename, file_data in email_data.attachments:
-                        logger.info(f"处理Word文件: {filename}")
-                        # 保存附件到临时文件
-                        temp_file = _tf.NamedTemporaryFile(
-                            delete=False,
-                            suffix=os.path.splitext(filename)[1]
-                        )
+                        filename_lower = filename.lower()
+                        logger.info(f"处理Word附件: {filename}")
+
+                        # 邮件里"Word + 独立图片附件"场景：图片不在 docx 内，需一并入库并插入占位符
+                        if any(filename_lower.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]):
+                            word_attachment_images.append((filename, file_data))
+                            logger.info(f"识别到独立图片附件: {filename}")
+                            continue
+
+                        # 非 Word 附件在该分支跳过
+                        if not filename_lower.endswith(('.doc', '.docx')):
+                            logger.info(f"跳过非Word附件: {filename}")
+                            continue
+
+                        # 上传原始Word附件到OSS，记录附件
+                        try:
+                            oss_url, oss_key = oss_service.upload_file(
+                                file_data=file_data,
+                                filename=filename,
+                                folder='attachments'
+                            )
+                            attachment_records.append({
+                                "attachment_type": "word",
+                                "oss_url": oss_url,
+                                "oss_key": oss_key,
+                                "original_filename": filename,
+                                "file_size": len(file_data) if file_data else None
+                            })
+                        except Exception as e:
+                            logger.error(f"Word附件上传失败: {filename}, err={e}")
+
+                        # 保存 Word 附件到临时文件
+                        temp_file = _tf.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1])
                         temp_file.write(file_data)
                         temp_file.close()
                         temp_file_path = temp_file.name
-                        logger.info(f"临时文件已保存: {temp_file_path}")
+                        logger.info(f"Word临时文件已保存: {temp_file_path}")
                         
                         # 处理Word文档
-                        if filename.lower().endswith('.doc'):
+                        if filename_lower.endswith('.doc'):
                             doc_path = temp_file_path
                             # 转换为docx（可能较慢，最多约 120 秒）
                             logger.info("开始将 .doc 转为 .docx")
@@ -222,7 +430,7 @@ async def process_email(email_data, doc_processor, oss_service):
                             # 提取文本时跳过标题行
                             content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
                         
-                        elif filename.lower().endswith('.docx'):
+                        elif filename_lower.endswith('.docx'):
                             docx_path = temp_file_path
                             logger.info("开始从 .docx 提取标题与正文")
                             # 先提取标题
@@ -232,11 +440,52 @@ async def process_email(email_data, doc_processor, oss_service):
                                 logger.info(f"从Word文档提取标题: {title}, 占用{title_lines}行")
                             # 提取文本时跳过标题行
                             content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
+
+                    # 提取 Word 内嵌图片（保持 [[IMG_1]] 起始顺序）
+                    if docx_path and os.path.exists(docx_path):
+                        embedded_images = doc_processor.extract_images_from_docx(docx_path)
+                        logger.info(f"从Word文档提取内嵌图片 {len(embedded_images)} 张")
+                        images_to_upload.extend(embedded_images)
+
+                    # 将"独立图片附件"追加到内容末尾，占位符从现有最大序号继续
+                    if word_attachment_images:
+                        import re
+                        existing_indexes = [
+                            int(x) for x in re.findall(r"\[\[IMG_(\d+)\]\]", content or "")
+                        ]
+                        next_idx = (max(existing_indexes) if existing_indexes else 0) + 1
+                        for filename, file_data in word_attachment_images:
+                            content = f"{content}\n\n[[IMG_{next_idx}]]"
+                            images_to_upload.append((filename, file_data))
+                            next_idx += 1
+                        logger.info(f"已追加独立图片附件 {len(word_attachment_images)} 张并写入占位符")
+
+                    # 处理视频附件（文档+视频场景）
+                    video_exts = {'.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv'}
+                    for filename, file_data in email_data.attachments:
+                        if any(filename.lower().endswith(ext) for ext in video_exts):
+                            logger.info(f"发现视频附件: {filename}, 大小: {len(file_data)/1024/1024:.2f}MB")
+                            oss_url, oss_key = oss_service.upload_file(
+                                file_data=file_data,
+                                filename=filename,
+                                folder='videos'
+                            )
+                            attachment_records.append({
+                                "attachment_type": "video",
+                                "oss_url": oss_url,
+                                "oss_key": oss_key,
+                                "original_filename": filename,
+                                "file_size": len(file_data) if file_data else None
+                            })
+                            video_tag = f'<video controls width="100%"><source src="{oss_url}" type="video/mp4"></video>'
+                            content = f"{content}\n\n{video_tag}"
+                            logger.info(f"视频已上传OSS并追加到内容: {oss_url}")
+
                 except Exception as e:
                     logger.error(f"Word处理异常: {e}", exc_info=True)
                     raise
                 finally:
-                    # 临时文件清理后移到“Word图片提取并上传”之后，
+                    # 临时文件清理后移到"Word图片提取并上传"之后，
                     # 否则会导致 docx_path 不存在，图片无法提取，只剩占位符。
                     logger.info(
                         f"暂缓清理Word临时文件: temp_file_path={temp_file_path}, "
@@ -244,79 +493,191 @@ async def process_email(email_data, doc_processor, oss_service):
                     )
             
             elif content_type == ContentType.ARCHIVE:
-                # 处理压缩包 - 解压并处理Word+图片（临时文件统一用函数内 _tf）
+                # 处理压缩包 - 解压并处理 Word + 图片 + 视频
                 import zipfile
+                import shutil
+                import subprocess
+
+                _video_exts = {'.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv'}
+
+                def _extract_archive(file_path: str, filename: str, extract_dir: str):
+                    fname_lower = filename.lower()
+                    if fname_lower.endswith('.zip'):
+                        with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                            for member in zip_ref.infolist():
+                                target = os.path.realpath(
+                                    os.path.join(extract_dir, member.filename)
+                                )
+                                if not target.startswith(
+                                    os.path.realpath(extract_dir) + os.sep
+                                ) and target != os.path.realpath(extract_dir):
+                                    raise ValueError(f"Zip Slip 检测到恶意路径: {member.filename}")
+                            zip_ref.extractall(extract_dir)
+                        return
+
+                    # rar/7z: 优先 7z，其次 unrar
+                    if shutil.which('7z'):
+                        result = subprocess.run(
+                            ['7z', 'x', '-y', f'-o{extract_dir}', file_path],
+                            capture_output=True,
+                            text=True
+                        )
+                        if result.returncode != 0:
+                            raise RuntimeError(result.stderr or result.stdout or '7z 解压失败')
+                        return
+                    if shutil.which('unrar'):
+                        result = subprocess.run(
+                            ['unrar', 'x', '-o+', file_path, extract_dir],
+                            capture_output=True,
+                            text=True
+                        )
+                        if result.returncode != 0:
+                            raise RuntimeError(result.stderr or result.stdout or 'unrar 解压失败')
+                        return
+
+                    raise RuntimeError('RAR/7Z 解压依赖未安装（需 7z 或 unrar）')
 
                 for filename, file_data in email_data.attachments:
-                    if filename.lower().endswith('.zip'):
-                        logger.info(f"发现压缩包: {filename}, 大小: {len(file_data)/1024/1024:.2f}MB")
-                        
-                        # 保存压缩包到临时文件
-                        with _tf.NamedTemporaryFile(delete=False, suffix='.zip') as zip_file:
-                            zip_file.write(file_data)
-                            zip_path = zip_file.name
-                        
-                        # 解压到临时目录
-                        extract_dir = _tf.mkdtemp()
-                        try:
-                            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                                for member in zip_ref.infolist():
-                                    target = os.path.realpath(
-                                        os.path.join(extract_dir, member.filename)
-                                    )
-                                    if not target.startswith(
-                                        os.path.realpath(extract_dir) + os.sep
-                                    ) and target != os.path.realpath(extract_dir):
-                                        raise ValueError(
-                                            f"Zip Slip 检测到恶意路径: {member.filename}"
-                                        )
-                                zip_ref.extractall(extract_dir)
-                            logger.info(f"压缩包已解压到: {extract_dir}")
-                            
-                            # 查找Word文档
-                            word_file = None
-                            for root, dirs, files in os.walk(extract_dir):
-                                for file in files:
-                                    if file.lower().endswith(('.doc', '.docx')):
-                                        word_file = os.path.join(root, file)
-                                        break
-                                if word_file:
+                    fname_lower = filename.lower()
+
+                    if not fname_lower.endswith(('.zip', '.rar', '.7z')):
+                        continue
+
+                    logger.info(f"发现压缩包: {filename}, 大小: {len(file_data)/1024/1024:.2f}MB")
+
+                    # 上传原始压缩包到OSS，记录附件
+                    try:
+                        arc_url, arc_key = oss_service.upload_file(
+                            file_data=file_data,
+                            filename=filename,
+                            folder='attachments'
+                        )
+                        attachment_records.append({
+                            "attachment_type": "archive",
+                            "oss_url": arc_url,
+                            "oss_key": arc_key,
+                            "original_filename": filename,
+                            "file_size": len(file_data) if file_data else None
+                        })
+                    except Exception as e:
+                        logger.error(f"压缩包上传失败: {filename}, err={e}")
+
+                    with _tf.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as zip_file:
+                        zip_file.write(file_data)
+                        zip_path = zip_file.name
+
+                    extract_dir = _tf.mkdtemp()
+                    try:
+                        _extract_archive(zip_path, filename, extract_dir)
+                        logger.info(f"压缩包已解压到: {extract_dir}")
+
+                        # ── 查找并处理 Word 文档 ──
+                        word_file = None
+                        for root, dirs, files in os.walk(extract_dir):
+                            for file in files:
+                                if file.lower().endswith(('.doc', '.docx')):
+                                    word_file = os.path.join(root, file)
                                     break
-                            
                             if word_file:
-                                logger.info(f"找到Word文档: {word_file}")
-                                
-                                # 转换.doc为.docx
-                                if word_file.lower().endswith('.doc'):
-                                    docx_path = doc_processor.convert_doc_to_docx(word_file)
-                                else:
-                                    docx_path = word_file
-                                
-                                # 提取标题
-                                doc_title, title_lines = doc_processor.extract_title_from_docx(docx_path)
-                                if doc_title and doc_title != "无标题":
-                                    title = doc_title
-                                    logger.info(f"从Word文档提取标题: {title}, 占用{title_lines}行")
-                                
-                                # 提取文本（跳过标题行）
-                                content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
-                                
-                                # 提取图片
-                                images = doc_processor.extract_images_from_docx(docx_path)
-                                logger.info(f"从Word文档提取{len(images)}张图片")
-                                
-                                # 上传图片到待上传列表
-                                for img_filename, img_data in images:
-                                    images_to_upload.append((img_filename, img_data))
+                                break
+
+                        if word_file:
+                            logger.info(f"找到Word文档: {word_file}")
+                            try:
+                                with open(word_file, 'rb') as wf:
+                                    word_data = wf.read()
+                                w_url, w_key = oss_service.upload_file(
+                                    file_data=word_data,
+                                    filename=os.path.basename(word_file),
+                                    folder='attachments'
+                                )
+                                attachment_records.append({
+                                    "attachment_type": "word",
+                                    "oss_url": w_url,
+                                    "oss_key": w_key,
+                                    "original_filename": os.path.basename(word_file),
+                                    "file_size": len(word_data) if word_data else None
+                                })
+                            except Exception as e:
+                                logger.error(f"压缩包内Word上传失败: {word_file}, err={e}")
+                            if word_file.lower().endswith('.doc'):
+                                docx_path = doc_processor.convert_doc_to_docx(word_file)
                             else:
-                                logger.warning("压缩包中未找到Word文档")
-                                content = "压缩包中未找到Word文档"
+                                docx_path = word_file
+
+                            doc_title, title_lines = doc_processor.extract_title_from_docx(docx_path)
+                            if doc_title and doc_title != "无标题":
+                                title = doc_title
+                                logger.info(f"从Word文档提取标题: {title}, 占用{title_lines}行")
+
+                            content = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
+
+                            embedded_images = doc_processor.extract_images_from_docx(docx_path)
+                            logger.info(f"从Word文档提取{len(embedded_images)}张图片")
+                            for img_filename, img_data in embedded_images:
+                                images_to_upload.append((img_filename, img_data))
+                        else:
+                            logger.warning("压缩包中未找到Word文档")
+                            content = "压缩包中未找到Word文档"
+
+                        # ── 查找并处理独立图片文件 ──
+                        image_exts = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+                        standalone_images = []
+                        for root, dirs, files in os.walk(extract_dir):
+                            for file in files:
+                                file_ext = '.' + file.rsplit('.', 1)[-1].lower() if '.' in file else ''
+                                if file_ext in image_exts:
+                                    img_path = os.path.join(root, file)
+                                    logger.info(f"压缩包内发现图片: {file}")
+                                    with open(img_path, 'rb') as img_f:
+                                        img_data = img_f.read()
+                                    standalone_images.append((file, img_data))
                         
-                        finally:
-                            # 清理临时文件
-                            import shutil
-                            shutil.rmtree(extract_dir, ignore_errors=True)
-                            os.unlink(zip_path)
+                        # 将独立图片添加到内容末尾（使用占位符）
+                        if standalone_images:
+                            # 找到现有占位符的最大序号
+                            import re
+                            existing_indexes = [
+                                int(x) for x in re.findall(r"\[\[IMG_(\d+)\]\]", content or "")
+                            ]
+                            next_idx = (max(existing_indexes) if existing_indexes else 0) + 1
+                            
+                            for img_filename, img_data in standalone_images:
+                                images_to_upload.append((img_filename, img_data))
+                                # 在内容中添加占位符
+                                placeholder = f"[[IMG_{next_idx}]]"
+                                content = f"{content}\n\n{placeholder}"
+                                next_idx += 1
+                            logger.info(f"压缩包内添加{len(standalone_images)}张独立图片到内容")
+
+                        # ── 查找并处理视频文件 ──
+                        for root, dirs, files in os.walk(extract_dir):
+                            for file in files:
+                                file_ext = '.' + file.rsplit('.', 1)[-1].lower() if '.' in file else ''
+                                if file_ext in _video_exts:
+                                    video_path = os.path.join(root, file)
+                                    logger.info(f"压缩包内发现视频: {file}")
+                                    with open(video_path, 'rb') as vf:
+                                        video_data = vf.read()
+                                    oss_url, oss_key = oss_service.upload_file(
+                                        file_data=video_data,
+                                        filename=file,
+                                        folder='videos'
+                                    )
+                                    attachment_records.append({
+                                        "attachment_type": "video",
+                                        "oss_url": oss_url,
+                                        "oss_key": oss_key,
+                                        "original_filename": file,
+                                        "file_size": len(video_data) if video_data else None
+                                    })
+                                    video_tag = f'<video controls width="100%"><source src="{oss_url}" type="video/mp4"></video>'
+                                    content = f"{content}\n\n{video_tag}"
+                                    logger.info(f"压缩包内视频已上传OSS: {oss_url}")
+
+                    finally:
+                        shutil.rmtree(extract_dir, ignore_errors=True)
+                        os.unlink(zip_path)
             
             elif content_type == ContentType.VIDEO:
                 # 处理视频附件 - 直接上传到OSS
@@ -330,6 +691,13 @@ async def process_email(email_data, doc_processor, oss_service):
                             filename=filename,
                             folder='videos'
                         )
+                        attachment_records.append({
+                            "attachment_type": "video",
+                            "oss_url": oss_url,
+                            "oss_key": oss_key,
+                            "original_filename": filename,
+                            "file_size": len(file_data) if file_data else None
+                        })
                         video_urls.append(oss_url)
                         logger.info(f"视频已上传到OSS: {oss_url}")
                 
@@ -346,9 +714,13 @@ async def process_email(email_data, doc_processor, oss_service):
                 content_source = 'weixin'
             elif content_type == ContentType.MEIPIAN:
                 content_source = 'meipian'
+            elif content_type == ContentType.OTHER_URL:
+                content_source = 'other_url'
+            elif content_type == ContentType.LARGE_ATTACHMENT:
+                content_source = 'large_attachment'
             elif content_type == ContentType.ARCHIVE:
-                # 压缩包解压后按Word处理
-                content_source = 'docx'
+                # 压缩包
+                content_source = 'archive'
             elif content_type == ContentType.VIDEO:
                 content_source = 'video'
             elif doc_path:
@@ -382,7 +754,7 @@ async def process_email(email_data, doc_processor, oss_service):
             
             # 保存解析的元数据
             if cooperation or media_type or source_unit:
-                site_id = EmailParser.get_wordpress_site_id(media_type) if media_type else None
+                site_id = await EmailParser.get_wordpress_site_id_async(media_type, db) if media_type else None
                 
                 # 更新投稿记录的元数据
                 await db.execute(
@@ -405,6 +777,21 @@ async def process_email(email_data, doc_processor, oss_service):
                 await db.commit()
                 
                 logger.info(f"元数据已保存: 合作={cooperation}, 媒体={media_type}, 单位={source_unit}, 站点={site_id}")
+
+            # 写入附件记录（Word/压缩包/视频等）
+            if attachment_records:
+                for rec in attachment_records:
+                    try:
+                        await submission_service.add_attachment(
+                            submission_id=submission.id,
+                            attachment_type=rec.get("attachment_type"),
+                            oss_url=rec.get("oss_url"),
+                            oss_key=rec.get("oss_key"),
+                            original_filename=rec.get("original_filename"),
+                            file_size=rec.get("file_size")
+                        )
+                    except Exception as e:
+                        logger.error(f"附件记录写入失败: {rec}, err={e}")
             
             # 上传从网页抓取的图片并替换URL
             url_mapping = {}  # 原始URL -> OSS URL的映射（用于 Markdown content）
@@ -496,36 +883,6 @@ async def process_email(email_data, doc_processor, oss_service):
                 await db.commit()
                 logger.info(f"已替换 {len(oss_urls_ordered) or len(url_mapping)} 个图片URL为OSS地址")
             
-            # 提取并上传Word文档中的图片
-            # 注意：部分分支会在前面清理临时 docx，若路径不存在则跳过，避免整封邮件失败。
-            if docx_path:
-                if os.path.exists(docx_path):
-                    images = doc_processor.extract_images_from_docx(docx_path)
-                    
-                    for img_filename, img_data in images:
-                        try:
-                            # 上传到OSS
-                            oss_url, oss_key = oss_service.upload_file(
-                                file_data=img_data,
-                                filename=img_filename,
-                                folder=f"submissions/{submission.id}"
-                            )
-                            
-                            # 记录图片信息
-                            await submission_service.add_image(
-                                submission_id=submission.id,
-                                oss_url=oss_url,
-                                oss_key=oss_key,
-                                original_filename=img_filename,
-                                file_size=len(img_data)
-                            )
-                        
-                        except Exception as e:
-                            logger.error(f"上传图片失败: {str(e)}")
-                            continue
-                else:
-                    logger.warning(f"跳过Word图片提取，文件不存在: {docx_path}")
-
             # Word分支：图片提取完成后再清理临时文件
             if content_type == ContentType.WORD:
                 if doc_path and os.path.exists(doc_path):
@@ -540,36 +897,68 @@ async def process_email(email_data, doc_processor, oss_service):
             from app.utils.content_processor import ContentProcessor
             draft_service = DraftService(db)
             
-            # 公众号和美篇：将HTML转换为Markdown，并插入占位符
-            if (content_type == ContentType.WEIXIN or content_type == ContentType.MEIPIAN) and original_html:
+            # 公众号、美篇、OTHER_URL（有原始HTML时）：将HTML转换为Markdown，并插入占位符
+            if (content_type in [ContentType.WEIXIN, ContentType.MEIPIAN, ContentType.OTHER_URL] and original_html and oss_urls_ordered):
                 import html2text
                 from bs4 import BeautifulSoup
                 
-                # 先用BeautifulSoup替换img标签为占位符
                 soup = BeautifulSoup(original_html, 'html.parser')
                 img_tags = soup.find_all('img')
-                
+                # 只替换前 N 张（与 oss 顺序一致），避免占位符与 media_map 错位
                 for idx, img in enumerate(img_tags, start=1):
-                    placeholder = f'[[IMG_{idx}]]'
-                    img.replace_with(placeholder)
+                    if idx <= len(oss_urls_ordered):
+                        placeholder = f'[[IMG_{idx}]]'
+                        img.replace_with(placeholder)
                 
-                # 转换为Markdown
                 h = html2text.HTML2Text()
                 h.ignore_links = False
                 h.ignore_images = False
                 h.body_width = 0
                 draft_content = h.handle(str(soup))
+                if content_type == ContentType.OTHER_URL:
+                    logger.info(f"OTHER_URL 已从 HTML 生成带占位符的草稿，图片数: {len(oss_urls_ordered)}")
             else:
                 draft_content = content
-            
-            draft = await draft_service.create_draft(
-                submission_id=submission.id,
-                transformed_content=draft_content
-            )
+
+            # Word/压缩包/OTHER_URL（有图时）：显式构建 media_map，避免占位符与图片错位或丢失
+            if content_type in [ContentType.WORD, ContentType.ARCHIVE, ContentType.OTHER_URL] and oss_urls_ordered:
+                draft_media_map = {
+                    f"[[IMG_{idx}]]": oss_url
+                    for idx, oss_url in enumerate(oss_urls_ordered, start=1)
+                }
+                draft = await draft_service.create_draft(
+                    submission_id=submission.id,
+                    original_content_md=draft_content,
+                    ai_content_md=draft_content,
+                    media_map=draft_media_map
+                )
+            else:
+                draft = await draft_service.create_draft(
+                    submission_id=submission.id,
+                    transformed_content=draft_content
+                )
             logger.info(f"已创建原文草稿: draft_id={draft.id}, content_type={content_type}")
             
             # 更新状态为completed
             await submission_service.update_status(submission.id, 'completed')
+            
+            # 若为替换稿，记录被替换的旧稿到 duplicate_logs
+            if superseded_id:
+                dup_log = DuplicateLog(
+                    email_subject=email_data.subject,
+                    email_from=email_data.from_addr,
+                    email_date=email_data.date,
+                    cooperation_type=cooperation.value if cooperation else None,
+                    media_type=media_type.value if media_type else None,
+                    source_unit=source_unit,
+                    title=title,
+                    duplicate_type="superseded",
+                    effective_submission_id=submission.id,
+                    superseded_submission_id=superseded_id,
+                )
+                db.add(dup_log)
+                await db.commit()
+                logger.info(f"已记录替换关系: 旧稿ID={superseded_id} -> 新稿ID={submission.id}")
             
             # 记录任务成功
             await submission_service.log_task(

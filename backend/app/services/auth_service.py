@@ -150,16 +150,18 @@ class AuthService:
         return users, total
 
     async def update_user(
-        self, 
-        user_id: int, 
-        role: str
+        self,
+        user_id: int,
+        role: str,
+        display_name: Optional[str] = None,
     ) -> Optional[User]:
         """
-        更新用户角色
+        更新用户角色和显示名
 
         Args:
             user_id: 用户ID
             role: 新角色（admin 或 editor）
+            display_name: 显示名（中文姓名），认领标签优先用此
 
         Returns:
             更新后的用户，不存在则返回 None
@@ -170,6 +172,8 @@ class AuthService:
         if not user:
             return None
         user.role = role
+        if display_name is not None:
+            user.display_name = display_name.strip() or None
         await self.db.commit()
         await self.db.refresh(user)
         return user

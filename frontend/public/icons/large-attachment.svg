@@ -1,0 +1,14 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+  <!-- 圆角背景 -->
+  <rect width="1024" height="1024" rx="128" fill="#FFC107"/>
+  
+  <!-- 云朵 -->
+  <path d="M 300 350 Q 280 280 350 260 Q 380 220 450 240 Q 520 200 600 240 Q 680 260 700 330 Q 760 340 780 400 Q 780 460 720 480 L 320 480 Q 260 470 260 410 Q 260 360 300 350 Z" fill="#FFFFFF"/>
+  
+  <!-- 下载箭头 -->
+  <rect x="480" y="420" width="64" height="200" rx="8" fill="#FFC107"/>
+  <path d="M 512 680 L 380 560 L 450 560 L 450 500 L 574 500 L 574 560 L 644 560 Z" fill="#FFC107"/>
+  
+  <!-- 底部横线（表示下载到本地） -->
+  <rect x="320" y="720" width="384" height="48" rx="24" fill="#FFFFFF"/>
+</svg>

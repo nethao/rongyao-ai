@@ -33,6 +33,24 @@
             show-password
           />
         </el-form-item>
+
+        <el-form-item prop="captcha_code">
+          <div class="captcha-row">
+            <el-input
+              v-model="loginForm.captcha_code"
+              placeholder="请输入验证码"
+              size="large"
+              class="captcha-input"
+              @keyup.enter="handleLogin"
+            />
+            <img
+              class="captcha-image"
+              :src="captchaImage"
+              alt="验证码"
+              @click="refreshCaptcha"
+            />
+          </div>
+        </el-form-item>
         
         <el-form-item>
           <el-button
@@ -63,7 +81,7 @@
 import { reactive, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { login as loginApi } from '../api/auth'
+import { login as loginApi, getCaptcha } from '../api/auth'
 import { setToken, setUserInfo } from '../utils/auth'
 
 const router = useRouter()
@@ -73,8 +91,12 @@ const loading = ref(false)
 
 const loginForm = reactive({
   username: '',
-  password: ''
+  password: '',
+  captcha_id: '',
+  captcha_code: ''
 })
+
+const captchaImage = ref('')
 
 const loginRules = {
   username: [
@@ -83,39 +105,61 @@ const loginRules = {
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
     { min: 6, message: '密码长度至少6位', trigger: 'blur' }
+  ],
+  captcha_code: [
+    { required: true, message: '请输入验证码', trigger: 'blur' }
   ]
+}
+
+const refreshCaptcha = async () => {
+  try {
+    const res = await getCaptcha()
+    captchaImage.value = res.captcha_image
+    loginForm.captcha_id = res.captcha_id
+  } catch (error) {
+    console.error('获取验证码失败:', error)
+  }
 }
 
 const handleLogin = async () => {
   if (!loginFormRef.value) return
-  
+  if (loading.value) return
+
   await loginFormRef.value.validate(async (valid) => {
     if (!valid) return
-    
+    if (loading.value) return
+
     loading.value = true
-    
+
     try {
       const response = await loginApi({
         username: loginForm.username,
-        password: loginForm.password
+        password: loginForm.password,
+        captcha_id: loginForm.captcha_id,
+        captcha_code: loginForm.captcha_code
       })
-      
+
       // 保存令牌和用户信息
       setToken(response.access_token)
       setUserInfo(response.user)
-      
+
       ElMessage.success('登录成功')
-      
+
       // 跳转到目标页面或首页
       const redirect = route.query.redirect || '/'
       router.push(redirect)
     } catch (error) {
       console.error('登录失败:', error)
+      const msg = error.response?.data?.detail || error.message || '登录失败'
+      ElMessage.error(msg)
+      await refreshCaptcha()
     } finally {
       loading.value = false
     }
   })
 }
+
+refreshCaptcha()
 </script>
 
 <style scoped>
@@ -150,6 +194,26 @@ const handleLogin = async () => {
 
 .login-tips {
   margin-top: 16px;
+}
+
+.captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.captcha-input {
+  flex: 1;
+}
+
+.captcha-image {
+  width: 140px;
+  height: 48px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #fff;
 }
 
 :deep(.el-card__header) {

@@ -94,9 +94,16 @@ async def get_system_stats(
     """
     from app.models.submission import Submission
     from app.models.draft import Draft
+    from app.models.duplicate_log import DuplicateLog
     
-    # 统计投稿数量
-    submissions_result = await db.execute(select(func.count(Submission.id)))
+    superseded_ids = select(DuplicateLog.superseded_submission_id).where(
+        DuplicateLog.superseded_submission_id.isnot(None)
+    )
+    
+    # 统计投稿数量（排除被替换的旧稿）
+    submissions_result = await db.execute(
+        select(func.count(Submission.id)).where(~Submission.id.in_(superseded_ids))
+    )
     total_submissions = submissions_result.scalar()
     
     # 统计草稿数量
@@ -109,9 +116,11 @@ async def get_system_stats(
     )
     total_published = published_result.scalar()
     
-    # 统计待处理投稿
+    # 统计待处理投稿（排除被替换的旧稿）
     pending_result = await db.execute(
-        select(func.count(Submission.id)).where(Submission.status == "pending")
+        select(func.count(Submission.id))
+        .where(Submission.status == "pending")
+        .where(~Submission.id.in_(superseded_ids))
     )
     pending_submissions = pending_result.scalar()
     

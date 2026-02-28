@@ -30,9 +30,10 @@ class Settings(BaseSettings):
     # CORS 允许的前端域名（逗号分隔，如 "https://e.com,http://localhost:3000"）
     ALLOWED_ORIGINS: str = ""
     
-    # OpenAI配置
+    # 阿里云百炼（通义千问）配置
     OPENAI_API_KEY: Optional[str] = None
-    OPENAI_MODEL: str = "gpt-4"
+    OPENAI_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    OPENAI_MODEL: str = "qwen-plus"
     
     # 阿里云OSS配置
     OSS_ACCESS_KEY_ID: Optional[str] = None
@@ -58,6 +59,7 @@ class Settings(BaseSettings):
     # 数据清理配置
     IMAGE_COMPRESS_DAYS: int = 365
     DATA_DELETE_DAYS: int = 730
+    ATTACHMENT_RETENTION_DAYS: int = 15
     CLEANUP_SCHEDULE_HOUR: int = 2  # 凌晨2点
     
     # 性能配置

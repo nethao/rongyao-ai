@@ -2,6 +2,14 @@
 认证API端点
 """
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
+from uuid import uuid4
+import base64
+import io
+import random
+import string
+from redis.asyncio import Redis
+from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.services.auth_service import AuthService
@@ -15,8 +23,68 @@ from app.schemas.auth import (
 from app.utils.auth import create_access_token
 from app.models.user import User
 from app.api.dependencies import get_current_user
+from app.config import settings
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+
+
+async def _get_redis() -> Redis:
+    return Redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
+def _generate_captcha_text(length: int = 4) -> str:
+    chars = string.ascii_uppercase + string.digits
+    return ''.join(random.choice(chars) for _ in range(length))
+
+
+def _render_captcha_image(text: str) -> bytes:
+    width, height = 140, 48
+    image = Image.new('RGB', (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 28)
+    except Exception:
+        font = ImageFont.load_default()
+
+    # 简单干扰线
+    for _ in range(4):
+        x1, y1 = random.randint(0, width), random.randint(0, height)
+        x2, y2 = random.randint(0, width), random.randint(0, height)
+        draw.line((x1, y1, x2, y2), fill=(180, 180, 180), width=1)
+
+    # 绘制文本
+    text_x = 10
+    for ch in text:
+        draw.text((text_x, 8), ch, font=font, fill=(0, 0, 0))
+        text_x += 30
+
+    # 干扰点
+    for _ in range(80):
+        draw.point((random.randint(0, width - 1), random.randint(0, height - 1)), fill=(150, 150, 150))
+
+    buf = io.BytesIO()
+    image.save(buf, format='PNG')
+    return buf.getvalue()
+
+
+@router.get("/captcha")
+async def get_captcha():
+    """
+    获取登录验证码
+    """
+    captcha_id = str(uuid4())
+    captcha_text = _generate_captcha_text(4)
+    image_bytes = _render_captcha_image(captcha_text)
+    image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+    redis = await _get_redis()
+    await redis.setex(f"captcha:{captcha_id}", 300, captcha_text.lower())
+    await redis.close()
+
+    return JSONResponse({
+        "captcha_id": captcha_id,
+        "captcha_image": f"data:image/png;base64,{image_base64}"
+    })
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -27,6 +95,19 @@ async def login(
     """
     用户登录
     """
+    # 校验验证码
+    redis = await _get_redis()
+    cache_key = f"captcha:{login_data.captcha_id}"
+    cached_code = await redis.get(cache_key)
+    await redis.delete(cache_key)
+    await redis.close()
+
+    if not cached_code or cached_code.lower() != (login_data.captcha_code or "").lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="验证码错误或已过期"
+        )
+
     auth_service = AuthService(db)
     user = await auth_service.authenticate(
         username=login_data.username,

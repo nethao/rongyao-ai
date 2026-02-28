@@ -9,11 +9,14 @@
           </el-button>
           <h2>内容审核</h2>
           <el-tag v-if="contentSource" :type="getSourceTagType(contentSource)" size="large" style="margin-left: 12px;">
-            <el-icon style="margin-right: 4px;">
-              <component :is="getSourceIcon(contentSource)" />
-            </el-icon>
+            <img :src="getSourceIconUrl(contentSource)" :alt="getSourceLabel(contentSource)" style="width: 18px; height: 18px; margin-right: 4px; vertical-align: middle;" />
             {{ getSourceLabel(contentSource) }}
           </el-tag>
+          <div class="header-meta">
+            <span>合作方式：{{ getCooperationLabel(cooperationType) }}</span>
+            <span>来稿单位：{{ sourceUnit || '-' }}</span>
+            <span>发布媒体：{{ getMediaTypeLabel(mediaType) }}</span>
+          </div>
         </div>
         <div class="header-right">
           <el-button type="warning" @click="handleRestoreAI">
@@ -46,13 +49,39 @@
       </template>
     </el-alert>
 
+    <!-- 其他链接提示 -->
+    <el-alert
+      v-if="contentSource === 'other_url'"
+      title="此为外部链接，需手动采集"
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 20px;"
+    >
+      <template #default>
+        请在左侧「原始内容」区点击链接打开原文，手动复制内容后粘贴到中间编辑器，再点击「AI改写」。
+      </template>
+    </el-alert>
+
     <el-card v-loading="loading" class="content-card">
       <div class="three-pane-container">
         <!-- 左栏：原文（HTML预览） -->
         <div class="pane left-pane">
           <div class="pane-header">
             <h3>原始内容</h3>
-            <el-tag type="info">只读</el-tag>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <el-button-group size="small">
+                <el-button @click="iframeGoBack" :disabled="!canGoBack">
+                  <el-icon><ArrowLeft /></el-icon>
+                  后退
+                </el-button>
+                <el-button @click="iframeGoForward" :disabled="!canGoForward">
+                  前进
+                  <el-icon><ArrowRight /></el-icon>
+                </el-button>
+              </el-button-group>
+              <el-tag type="info">只读</el-tag>
+            </div>
           </div>
           <div class="pane-content left-content-wrap">
             <!-- 原文标题（只读） -->
@@ -64,7 +93,7 @@
               v-if="originalHtml"
               ref="previewIframeRef"
               class="html-preview-iframe"
-              sandbox="allow-same-origin"
+              sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"
               title="原文预览"
             />
             <div v-else class="html-preview-empty">暂无原文</div>
@@ -85,6 +114,26 @@
                 <el-icon><Edit /></el-icon>
                 AI改写
               </el-button>
+              <el-upload
+                :show-file-list="false"
+                :before-upload="handleWordUpload"
+                accept=".doc,.docx"
+              >
+                <el-button :loading="wordUploading">
+                  <el-icon><Document /></el-icon>
+                  Word上传
+                </el-button>
+              </el-upload>
+              <el-upload
+                :show-file-list="false"
+                :before-upload="handleImageUpload"
+                accept="image/*"
+              >
+                <el-button>
+                  <el-icon><Picture /></el-icon>
+                  图片上传
+                </el-button>
+              </el-upload>
               <el-tooltip 
                 v-if="contentSource === 'video'" 
                 content="视频内容需要手工编辑，不支持AI改写" 
@@ -152,59 +201,50 @@
           </div>
         </div>
 
-        <!-- 右侧边栏：修改历史 -->
+        <!-- 右侧边栏：本文附件 -->
         <div class="sidebar right-sidebar">
           <div class="sidebar-header">
-            <h3>快照历史</h3>
-            <el-button size="small" @click="createSnapshot('手动快照')">
-              <el-icon><Check /></el-icon>
-            </el-button>
+            <h3>本文附件</h3>
           </div>
           <div class="sidebar-content">
-            <div v-if="snapshots.length > 0" class="snapshots-list">
+            <el-alert
+              title="OSS文件自动删除规则"
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 12px;"
+            >
+              <template #default>
+                默认保留 {{ attachmentRetentionDays || 15 }} 天，过期自动清理。
+              </template>
+            </el-alert>
+
+            <div v-if="attachments.length > 0" class="attachments-list">
               <div
-                v-for="snapshot in snapshots"
-                :key="snapshot.id"
-                class="snapshot-item"
-                @click="handleSnapshotRestore(snapshot)"
+                v-for="att in attachments"
+                :key="`${att.type}-${att.id || att.url}`"
+                class="attachment-item"
               >
-                <div class="snapshot-label">{{ snapshot.label }}</div>
-                <div class="snapshot-time">{{ snapshot.timestamp }}</div>
+                <div class="attachment-icon">
+                  <el-icon v-if="att.type === 'image'"><Picture /></el-icon>
+                  <img v-else-if="att.type === 'video'" :src="mp4IconUrl" alt="视频" />
+                  <img v-else-if="att.type === 'word'" src="/icons/WORD.svg" alt="Word" />
+                  <img v-else-if="att.type === 'archive'" :src="archiveIconUrl" alt="压缩包" />
+                  <img v-else :src="webIconUrl" alt="附件" />
+                </div>
+                <div class="attachment-info">
+                  <div class="attachment-name" :title="att.name">{{ att.name }}</div>
+                  <div class="attachment-meta">
+                    <span>{{ getAttachmentTypeLabel(att.type) }}</span>
+                    <span v-if="att.size"> · {{ formatFileSize(att.size) }}</span>
+                  </div>
+                </div>
+                <div class="attachment-actions">
+                  <a :href="att.url" target="_blank">查看</a>
+                </div>
               </div>
             </div>
-
-            <el-divider>数据库版本</el-divider>
-            <el-timeline v-if="versions.length > 0">
-              <el-timeline-item
-                v-for="version in versions"
-                :key="version.id"
-                :timestamp="formatDate(version.created_at)"
-                placement="top"
-              >
-                <el-card
-                  class="version-card"
-                  :class="{ active: version.version_number === currentVersion }"
-                  @click="handleVersionClick(version)"
-                >
-                  <div class="version-header">
-                    <el-tag size="small">v{{ version.version_number }}</el-tag>
-                    <el-tag v-if="version.version_number === 1" size="small" type="success">AI初版</el-tag>
-                  </div>
-                  <div class="version-preview">
-                    {{ version.content.substring(0, 80) }}...
-                  </div>
-                  <el-button
-                    v-if="version.version_number !== currentVersion"
-                    size="small"
-                    type="primary"
-                    @click.stop="handleRestoreVersion(version)"
-                  >
-                    恢复此版本
-                  </el-button>
-                </el-card>
-              </el-timeline-item>
-            </el-timeline>
-            <el-empty v-else description="暂无历史版本" />
+            <el-empty v-else description="暂无附件" />
           </div>
         </div>
       </div>
@@ -235,6 +275,15 @@
               </span>
             </el-option>
           </el-select>
+        </el-form-item>
+        <el-form-item label="合作方式">
+          <el-input :value="getCooperationLabel(cooperationType)" disabled />
+        </el-form-item>
+        <el-form-item label="来稿单位">
+          <el-input :value="sourceUnit || '-'" disabled />
+        </el-form-item>
+        <el-form-item label="发布媒体">
+          <el-input :value="getMediaTypeLabel(mediaType)" disabled />
         </el-form-item>
         <el-form-item label="文章标题">
           <el-input :value="articleTitle" disabled />
@@ -296,18 +345,17 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft,
+  ArrowRight,
   RefreshLeft,
   Check,
   Upload,
   Edit,
   Document,
+  Picture,
   InfoFilled,
   Link,
-  Picture,
-  Folder,
-  VideoCamera
 } from '@element-plus/icons-vue'
-import { getDraft, updateDraft, getDraftVersions, restoreVersion, restoreAIVersion } from '../api/draft'
+import { getDraft, updateDraft, restoreAIVersion, uploadWordToDraft } from '../api/draft'
 import { triggerTransform, getTransformStatus } from '../api/submission'
 import { markdownToHtml, htmlToMarkdown } from '../utils/markdown'
 import TiptapEditor from '../components/TiptapEditor.vue'
@@ -319,6 +367,7 @@ const route = useRoute()
 const loading = ref(false)
 const saving = ref(false)
 const transforming = ref(false)
+const wordUploading = ref(false)
 const showSourceCode = ref(false)  // 源码模式
 const draftId = ref(null)
 const submissionId = ref(null)
@@ -330,13 +379,14 @@ const editableContent = ref('')
 const editableHtml = ref('')
 const currentVersion = ref(1)
 const hasUnsavedChanges = ref(false)
+const cooperationType = ref('')
+const mediaType = ref('')
+const sourceUnit = ref('')
 
 // 版本历史
-const loadingVersions = ref(false)
-const versions = ref([])
-
-// 历史快照
-const snapshots = ref([])
+// 附件
+const attachments = ref([])
+const attachmentRetentionDays = ref(15)
 
 // 自动保存定时器
 let autoSaveTimer = null
@@ -346,6 +396,33 @@ const tiptapRef = ref(null)
 
 // 原文预览 iframe
 const previewIframeRef = ref(null)
+const canGoBack = ref(false)
+const canGoForward = ref(false)
+
+// iframe 导航控制
+const iframeGoBack = () => {
+  if (previewIframeRef.value?.contentWindow) {
+    previewIframeRef.value.contentWindow.history.back()
+    updateNavigationState()
+  }
+}
+
+const iframeGoForward = () => {
+  if (previewIframeRef.value?.contentWindow) {
+    previewIframeRef.value.contentWindow.history.forward()
+    updateNavigationState()
+  }
+}
+
+const updateNavigationState = () => {
+  setTimeout(() => {
+    if (previewIframeRef.value?.contentWindow) {
+      const win = previewIframeRef.value.contentWindow
+      canGoBack.value = win.history.length > 1
+      canGoForward.value = false // 浏览器无法直接检测 forward 状态
+    }
+  }, 100)
+}
 
 // 公众号排版基础样式
 const WEIXIN_PREVIEW_STYLE = `
@@ -372,6 +449,16 @@ function writePreviewIframe(html) {
       `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>${WEIXIN_PREVIEW_STYLE}</style></head><body>${html}</body></html>`
     )
     doc.close()
+    
+    // 监听 iframe 内的导航事件
+    try {
+      iframe.contentWindow.addEventListener('popstate', updateNavigationState)
+      iframe.contentWindow.addEventListener('hashchange', updateNavigationState)
+    } catch (e) {
+      // 跨域限制，忽略
+    }
+    updateNavigationState()
+    
     return true
   }
   if (doWrite()) return
@@ -402,6 +489,11 @@ const loadDraft = async () => {
     submissionId.value = response.submission_id
     articleTitle.value = response.email_subject || ''
     contentSource.value = response.content_source || ''
+    targetSiteId.value = response.target_site_id || null  // 获取目标站点ID
+    cooperationType.value = response.cooperation_type || ''
+    mediaType.value = response.media_type || ''
+    sourceUnit.value = response.source_unit || ''
+    console.log('加载草稿，目标站点ID:', targetSiteId.value)
     originalContent.value = response.original_content
     currentVersion.value = response.current_version
     hasUnsavedChanges.value = false
@@ -429,30 +521,15 @@ const loadDraft = async () => {
       writePreviewIframe(originalHtml.value)
     }
 
-    // 创建初始快照
-    await nextTick()
-    createSnapshot('初始版本')
-
-    await loadVersions()
+    // 附件
+    attachments.value = response.attachments || []
+    attachmentRetentionDays.value = response.attachment_retention_days || 15
   } catch (error) {
     ElMessage.error('加载草稿失败: ' + (error.message || '未知错误'))
     router.push({ name: 'submissions' })
   } finally {
     loading.value = false
   }
-}
-
-// 创建快照
-const createSnapshot = (label) => {
-  const html = tiptapRef.value?.getHTML?.() || editableHtml.value
-  if (!html) return
-
-  snapshots.value.push({
-    id: Date.now(),
-    label: label || `修改 ${snapshots.value.length + 1}`,
-    content: html,
-    timestamp: new Date().toLocaleString('zh-CN')
-  })
 }
 
 // 内容变化处理
@@ -487,7 +564,12 @@ const handleSave = async (isAutoSave = false) => {
     return
   }
 
-  const html = tiptapRef.value?.getHTML?.()
+  let html = ''
+  if (showSourceCode.value) {
+    html = editableHtml.value || ''
+  } else {
+    html = tiptapRef.value?.getHTML?.() || editableHtml.value || ''
+  }
   if (!html) return
 
   saving.value = true
@@ -499,7 +581,6 @@ const handleSave = async (isAutoSave = false) => {
     hasUnsavedChanges.value = false
 
     if (!isAutoSave) {
-      createSnapshot('手动保存')
       ElMessage.success('保存成功')
     }
   } catch (error) {
@@ -530,63 +611,6 @@ const handleBack = async () => {
   }
 
   router.push({ name: 'submissions' })
-}
-
-// 加载版本历史
-const loadVersions = async () => {
-  loadingVersions.value = true
-
-  try {
-    const response = await getDraftVersions(draftId.value)
-    versions.value = response.versions
-  } catch (error) {
-    ElMessage.error('加载版本历史失败: ' + (error.message || '未知错误'))
-  } finally {
-    loadingVersions.value = false
-  }
-}
-
-// 版本点击
-const handleVersionClick = (version) => {
-  const html = markdownToHtml(version.content)
-  tiptapRef.value?.setHTML?.(html)
-}
-
-// 恢复版本
-const handleRestoreVersion = async (version) => {
-  try {
-    await ElMessageBox.confirm(
-      `确定要恢复到版本 ${version.version_number} 吗？`,
-      '提示',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-
-    const response = await restoreVersion(draftId.value, version.id)
-    editableContent.value = response.current_content
-    currentVersion.value = response.current_version
-    hasUnsavedChanges.value = false
-
-    const html = markdownToHtml(editableContent.value)
-    tiptapRef.value?.setHTML?.(html)
-    createSnapshot('恢复版本')
-
-    await loadVersions()
-    ElMessage.success('版本恢复成功')
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('恢复版本失败: ' + (error.message || '未知错误'))
-    }
-  }
-}
-
-// 快照回滚
-const handleSnapshotRestore = (snapshot) => {
-  tiptapRef.value?.setHTML?.(snapshot.content)
-  ElMessage.success('已回滚到: ' + snapshot.label)
 }
 
 // AI 改写
@@ -638,7 +662,6 @@ const handleAiTransform = async () => {
       currentVersion.value = res.current_version
       hasUnsavedChanges.value = false
       tiptapRef.value?.setHTML?.(processedContent)
-      await loadVersions()
       transforming.value = false
       transformProgress.value = 100
       setTimeout(() => {
@@ -708,6 +731,100 @@ const handleAiTransform = async () => {
   }
 }
 
+// Word上传并应用
+const handleWordUpload = async (file) => {
+  if (!draftId.value) {
+    ElMessage.warning('草稿尚未加载完成')
+    return false
+  }
+  if (!file) return false
+  const name = file.name || ''
+  if (!name.toLowerCase().endsWith('.doc') && !name.toLowerCase().endsWith('.docx')) {
+    ElMessage.warning('仅支持上传 .doc 或 .docx 文件')
+    return false
+  }
+
+  if (hasUnsavedChanges.value) {
+    try {
+      await ElMessageBox.confirm(
+        '当前有未保存的修改，上传Word将覆盖编辑内容。确定继续吗？',
+        '提示',
+        {
+          confirmButtonText: '继续',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }
+      )
+    } catch {
+      return false
+    }
+  }
+
+  wordUploading.value = true
+  try {
+    const res = await uploadWordToDraft(draftId.value, file)
+    if (res?.title && res.title !== '无标题') {
+      articleTitle.value = res.title
+    }
+    const html = res?.content_html || ''
+    if (!html) {
+      ElMessage.error('解析失败：未生成有效内容')
+      return false
+    }
+
+    editableContent.value = html
+    editableHtml.value = html
+    await nextTick()
+    tiptapRef.value?.setHTML?.(html)
+    hasUnsavedChanges.value = true
+
+    await handleSave(false)
+    ElMessage.success('Word已解析并应用到编辑器')
+  } catch (error) {
+    ElMessage.error('Word解析失败: ' + (error?.message || '未知错误'))
+  } finally {
+    wordUploading.value = false
+  }
+  return false
+}
+
+// 图片上传并插入编辑器（base64，保存时自动上传OSS）
+const handleImageUpload = async (file) => {
+  if (!file) return false
+  if (!file.type || !file.type.startsWith('image/')) {
+    ElMessage.warning('仅支持图片文件')
+    return false
+  }
+
+  const reader = new FileReader()
+  reader.onload = async (e) => {
+    const base64 = e.target?.result
+    if (!base64) {
+      ElMessage.error('图片读取失败')
+      return
+    }
+
+    if (showSourceCode.value) {
+      const imgTag = `<img src="${base64}" style="max-width:100%; height:auto;" />`
+      editableHtml.value = `${editableHtml.value || ''}\n${imgTag}\n`
+      handleContentChange()
+    } else {
+      tiptapRef.value?.editor?.chain().focus().setImage({ src: base64 }).run()
+      handleContentChange()
+    }
+
+    await nextTick()
+    await handleSave(false)
+    ElMessage.success('图片已插入并保存')
+  }
+  reader.onerror = () => {
+    ElMessage.error('图片读取失败')
+  }
+  reader.readAsDataURL(file)
+
+  return false
+}
+
 // 恢复AI版本
 const handleRestoreAI = async () => {
   try {
@@ -736,48 +853,107 @@ const handleRestoreAI = async () => {
 }
 
 // 获取来源图标
-const getSourceIcon = (source) => {
-  const icons = {
-    weixin: Link,
-    meipian: Picture,
-    doc: Document,
-    docx: Document,
-    video: VideoCamera,
-    text: Document
-  }
-  return icons[source] || Document
+const normalizeContentSource = (source) => {
+  return String(source || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
 }
+
+// 来源 SVG 图标路径
+const _base = import.meta.env.BASE_URL
+const SOURCE_ICONS = {
+  weixin:    _base + 'icons/weixin.svg',
+  meipian:   _base + 'icons/meipian.svg',
+  doc:       _base + 'icons/WORD.svg',
+  docx:      _base + 'icons/WORD.svg',
+  video:     _base + 'icons/mp4.svg',
+  archive:   _base + 'icons/archive.svg',
+  other_url: _base + 'icons/web.svg',
+  large_attachment: _base + 'icons/large-attachment.svg',
+  text:      _base + 'icons/text.svg',
+}
+const getSourceIconUrl = (source) => SOURCE_ICONS[normalizeContentSource(source)] || (_base + 'icons/text.svg')
 
 // 获取来源标签
 const getSourceLabel = (source) => {
   const labels = {
-    weixin: '微信公众号',
-    meipian: '美篇',
-    doc: 'Word文档',
-    docx: 'Word文档',
-    video: '视频',
-    text: '文本'
+    weixin:    '微信公众号',
+    meipian:   '美篇',
+    doc:       'Word文档',
+    docx:      'Word文档',
+    video:     '视频',
+    archive:   '压缩包',
+    other_url: '其他链接',
+    large_attachment: '超大附件',
+    text:      '文本',
   }
-  return labels[source] || '未知'
+  return labels[normalizeContentSource(source)] || '未知'
 }
 
-// 获取标签类型
+// 获取标签颜色类型
 const getSourceTagType = (source) => {
   const types = {
-    weixin: 'success',
-    meipian: 'warning',
-    doc: 'primary',
-    docx: 'primary',
-    video: 'danger',
-    text: 'info'
+    weixin:    'success',
+    meipian:   'warning',
+    doc:       'primary',
+    docx:      'primary',
+    video:     'danger',
+    archive:   'warning',
+    other_url: 'info',
+    text:      'info',
   }
-  return types[source] || 'info'
+  return types[normalizeContentSource(source)] || 'info'
+}
+
+const mp4IconUrl = _base + 'icons/mp4.svg'
+const archiveIconUrl = _base + 'icons/archive.svg'
+const webIconUrl = _base + 'icons/web.svg'
+
+const getAttachmentTypeLabel = (type) => {
+  const labels = {
+    image: '图片',
+    video: '视频',
+    word: 'Word',
+    archive: '压缩包',
+    other: '附件'
+  }
+  return labels[String(type || '').toLowerCase()] || '附件'
+}
+
+const formatFileSize = (size) => {
+  if (!size || Number.isNaN(size)) return '-'
+  const bytes = Number(size)
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb.toFixed(1)} KB`
+  const mb = kb / 1024
+  if (mb < 1024) return `${mb.toFixed(1)} MB`
+  const gb = mb / 1024
+  return `${gb.toFixed(1)} GB`
+}
+
+const getCooperationLabel = (type) => {
+  const labels = {
+    free: '免费投稿',
+    partner: '合作客户',
+  }
+  return labels[String(type || '').trim()] || '-'
+}
+
+const getMediaTypeLabel = (type) => {
+  const labels = {
+    rongyao: '荣耀网',
+    shidai: '时代网',
+    zhengxian: '争先网',
+    zhengqi: '政企网',
+    toutiao: '今日头条',
+  }
+  return labels[String(type || '').trim()] || '-'
 }
 
 // 发布相关
 const publishDialogVisible = ref(false)
 const publishLoading = ref(false)
 const selectedSiteId = ref(null)
+const targetSiteId = ref(null)  // 邮件解析的目标站点ID
 const wordpressSites = ref([])
 const publishHistory = ref([])
 
@@ -831,6 +1007,26 @@ const handlePublish = async () => {
   if (wordpressSites.value.length === 0) {
     ElMessage.error('没有可用的WordPress站点，请先配置站点')
     return
+  }
+  
+  // 默认选中目标站点（如果存在）
+  console.log('目标站点ID:', targetSiteId.value)
+  console.log('可用站点:', wordpressSites.value.map(s => ({ id: s.id, name: s.name })))
+  
+  if (targetSiteId.value) {
+    const targetSite = wordpressSites.value.find(site => site.id === targetSiteId.value)
+    if (targetSite) {
+      selectedSiteId.value = targetSiteId.value
+      console.log('已自动选中目标站点:', targetSite.name)
+      ElMessage.info(`已自动选中目标站点：${targetSite.name}`)
+    } else {
+      selectedSiteId.value = null
+      console.log('目标站点未配置，站点ID:', targetSiteId.value)
+      ElMessage.warning('邮件指定的目标站点尚未配置，请手动选择发布站点')
+    }
+  } else {
+    selectedSiteId.value = null
+    console.log('未指定目标站点')
   }
   
   publishDialogVisible.value = true
@@ -947,6 +1143,15 @@ onBeforeUnmount(() => {
   gap: 15px;
 }
 
+.header-meta {
+  margin-left: 4px;
+  display: flex;
+  gap: 16px;
+  color: #606266;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .header-left h2 {
   margin: 0;
   font-size: 20px;
@@ -956,6 +1161,63 @@ onBeforeUnmount(() => {
 .header-right {
   display: flex;
   gap: 10px;
+}
+
+.attachments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.attachment-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.attachment-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f7fa;
+  border-radius: 6px;
+  color: #606266;
+}
+
+.attachment-icon img {
+  width: 20px;
+  height: 20px;
+}
+
+.attachment-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.attachment-name {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attachment-meta {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 2px;
+}
+
+.attachment-actions a {
+  font-size: 12px;
+  color: #409eff;
+  text-decoration: none;
 }
 
 .content-card {
@@ -1117,70 +1379,6 @@ onBeforeUnmount(() => {
   padding: 24px;
   color: #909399;
   text-align: center;
-}
-
-/* 版本卡片 */
-.version-card {
-  cursor: pointer;
-  margin-bottom: 10px;
-  transition: all 0.3s;
-}
-
-.version-card:hover {
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
-}
-
-.version-card.active {
-  border-color: #409eff;
-  background-color: #ecf5ff;
-}
-
-.version-header {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.version-preview {
-  font-size: 13px;
-  color: #606266;
-  margin-bottom: 10px;
-  line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-}
-
-/* 快照列表 */
-.snapshots-list {
-  margin-bottom: 10px;
-}
-
-.snapshot-item {
-  padding: 10px;
-  margin-bottom: 8px;
-  background: #f5f7fa;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.snapshot-item:hover {
-  background: #e6f7ff;
-  transform: translateX(-2px);
-}
-
-.snapshot-label {
-  font-weight: 500;
-  color: #303133;
-  margin-bottom: 4px;
-}
-
-.snapshot-time {
-  font-size: 12px;
-  color: #909399;
 }
 
 /* AI改写进度条 */

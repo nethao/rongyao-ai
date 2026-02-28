@@ -12,6 +12,9 @@ from app.api.dependencies import require_admin
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
+# 排除被新稿替换的旧稿（duplicate_logs.superseded_submission_id）
+_SUPERSEDED_EXCLUSION = "id NOT IN (SELECT superseded_submission_id FROM duplicate_logs WHERE superseded_submission_id IS NOT NULL)"
+
 
 @router.get("/overview")
 async def get_overview(
@@ -21,7 +24,7 @@ async def get_overview(
     current_user: User = Depends(require_admin)
 ):
     """获取概览统计"""
-    where_clause = "WHERE 1=1"
+    where_clause = f"WHERE {_SUPERSEDED_EXCLUSION}"
     params = {}
     
     if start_date:
@@ -63,7 +66,7 @@ async def get_trends(
     current_user: User = Depends(require_admin)
 ):
     """获取投稿趋势统计"""
-    where_clause = "WHERE 1=1"
+    where_clause = f"WHERE {_SUPERSEDED_EXCLUSION}"
     params = {}
     
     if start_date:
@@ -113,7 +116,7 @@ async def get_editor_stats(
     current_user: User = Depends(require_admin)
 ):
     """获取采编投稿统计"""
-    where_clause = "WHERE email_from IS NOT NULL"
+    where_clause = f"WHERE {_SUPERSEDED_EXCLUSION} AND email_from IS NOT NULL"
     params = {}
     
     if start_date:
@@ -168,7 +171,7 @@ async def get_media_stats(
     current_user: User = Depends(require_admin)
 ):
     """获取媒体类型统计"""
-    where_clause = "WHERE media_type IS NOT NULL"
+    where_clause = f"WHERE {_SUPERSEDED_EXCLUSION} AND media_type IS NOT NULL"
     params = {}
     
     if start_date:
@@ -217,7 +220,7 @@ async def get_unit_stats(
     current_user: User = Depends(require_admin)
 ):
     """获取来稿单位统计"""
-    where_clause = "WHERE source_unit IS NOT NULL"
+    where_clause = f"WHERE {_SUPERSEDED_EXCLUSION} AND source_unit IS NOT NULL"
     params = {}
     
     if start_date:
@@ -266,7 +269,7 @@ async def get_user_stats(
     current_user: User = Depends(require_admin)
 ):
     """获取编辑人员统计"""
-    where_clause = "WHERE 1=1"
+    where_clause = "WHERE s.id NOT IN (SELECT superseded_submission_id FROM duplicate_logs WHERE superseded_submission_id IS NOT NULL)"
     params = {}
     
     if start_date:
@@ -362,7 +365,7 @@ async def get_source_stats(
     current_user: User = Depends(require_admin)
 ):
     """获取内容来源统计"""
-    where_clause = "WHERE content_source IS NOT NULL"
+    where_clause = f"WHERE {_SUPERSEDED_EXCLUSION} AND content_source IS NOT NULL"
     params = {}
     
     if start_date:

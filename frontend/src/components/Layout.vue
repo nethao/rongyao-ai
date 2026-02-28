@@ -15,9 +15,17 @@
             <el-icon><Document /></el-icon>
             投稿列表
           </el-menu-item>
-          <el-menu-item index="/analytics">
+          <el-menu-item v-if="isAdmin" index="/analytics">
             <el-icon><DataAnalysis /></el-icon>
             数据分析
+          </el-menu-item>
+          <el-menu-item v-if="isAdmin" index="/duplicate-logs">
+            <el-icon><DocumentCopy /></el-icon>
+            重复稿件
+          </el-menu-item>
+          <el-menu-item index="/profile">
+            <el-icon><User /></el-icon>
+            个人中心
           </el-menu-item>
           <el-menu-item v-if="isAdmin" index="/users">
             <el-icon><UserFilled /></el-icon>
@@ -36,6 +44,10 @@
           </span>
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item command="profile">
+                <el-icon><User /></el-icon>
+                个人中心
+              </el-dropdown-item>
               <el-dropdown-item command="logout">
                 <el-icon><SwitchButton /></el-icon>
                 退出登录
@@ -57,6 +69,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Document,
+  DocumentCopy,
   Setting,
   User,
   UserFilled,
@@ -84,6 +97,15 @@ const activeMenu = computed(() => {
   if (path.startsWith('/config')) {
     return '/config'
   }
+  if (path.startsWith('/profile')) {
+    return '/profile'
+  }
+  if (path.startsWith('/analytics')) {
+    return '/analytics'
+  }
+  if (path.startsWith('/duplicate-logs')) {
+    return '/duplicate-logs'
+  }
   return path
 })
 
@@ -104,6 +126,10 @@ const handleMenuSelect = (index) => {
 
 // 下拉菜单命令
 const handleCommand = async (command) => {
+  if (command === 'profile') {
+    router.push('/profile')
+    return
+  }
   if (command === 'logout') {
     try {
       await ElMessageBox.confirm(

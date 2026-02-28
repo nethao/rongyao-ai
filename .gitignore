@@ -69,3 +69,9 @@ alembic.ini
 # 上传文件
 uploads/
 media/
+
+# 本地缓存与浏览器
+backend/.cache/
+frontend/.vite-cache/
+chrome-linux64/
+chrome-linux64.zip

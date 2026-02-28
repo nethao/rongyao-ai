@@ -4,11 +4,14 @@
 from datetime import datetime, timedelta
 from celery import shared_task
 from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 from app.database import async_session_maker
 from app.models.submission import SubmissionImage, Submission
+from app.models.submission_attachment import SubmissionAttachment
 from app.models.draft import Draft
 from app.models.task_log import TaskLog
 from app.services.oss_service import OSSService
+from app.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -130,8 +133,13 @@ async def delete_old_data():
             
             # 查找730天前的投稿
             cutoff_date = datetime.utcnow() - timedelta(days=730)
-            query = select(Submission).where(
-                Submission.created_at < cutoff_date
+            query = (
+                select(Submission)
+                .where(Submission.created_at < cutoff_date)
+                .options(
+                    selectinload(Submission.images),
+                    selectinload(Submission.attachments)
+                )
             )
             
             result = await db.execute(query)
@@ -139,6 +147,7 @@ async def delete_old_data():
             
             deleted_submissions = 0
             deleted_images = 0
+            deleted_attachments = 0
             
             oss_service = OSSService()
             
@@ -152,6 +161,14 @@ async def delete_old_data():
                             deleted_images += 1
                         except Exception as e:
                             logger.error(f"删除OSS图片 {image.oss_key} 失败: {str(e)}")
+
+                    # 删除关联的OSS附件
+                    for att in submission.attachments:
+                        try:
+                            oss_service.delete_file(att.oss_key)
+                            deleted_attachments += 1
+                        except Exception as e:
+                            logger.error(f"删除OSS附件 {att.oss_key} 失败: {str(e)}")
                     
                     # 删除投稿（级联删除草稿和图片记录）
                     await db.delete(submission)
@@ -169,14 +186,15 @@ async def delete_old_data():
                 task_type="cleanup",
                 task_id="delete_old_data",
                 status="success",
-                message=f"删除完成: 投稿 {deleted_submissions}, 图片 {deleted_images}"
+                message=f"删除完成: 投稿 {deleted_submissions}, 图片 {deleted_images}, 附件 {deleted_attachments}"
             )
             db.add(task_log)
             await db.commit()
             
             return {
                 "deleted_submissions": deleted_submissions,
-                "deleted_images": deleted_images
+                "deleted_images": deleted_images,
+                "deleted_attachments": deleted_attachments
             }
             
         except Exception as e:
@@ -215,10 +233,63 @@ async def daily_cleanup():
     
     # 删除旧数据
     delete_result = await delete_old_data()
+
+    # 删除过期附件
+    attachment_result = await delete_old_attachments()
     
     logger.info("每日清理任务完成")
     
     return {
         "compress": compress_result,
-        "delete": delete_result
+        "delete": delete_result,
+        "attachments": attachment_result
     }
+
+
+@shared_task(name="cleanup.delete_old_attachments")
+def delete_old_attachments_task():
+    """
+    删除过期附件
+    """
+    import asyncio
+    return asyncio.run(delete_old_attachments())
+
+
+async def delete_old_attachments():
+    """
+    删除保留期外的附件（默认15天）
+    规则：
+    - 压缩包（archive）按保留期删除
+    - 图片/视频类附件需要长期保留（不自动删除）
+    """
+    async with async_session_maker() as db:
+        try:
+            retention_days = settings.ATTACHMENT_RETENTION_DAYS or 15
+            cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+
+            result = await db.execute(
+                select(SubmissionAttachment).where(
+                    and_(
+                        SubmissionAttachment.created_at < cutoff_date,
+                        SubmissionAttachment.attachment_type == "archive",
+                    )
+                )
+            )
+            attachments = result.scalars().all()
+
+            deleted_count = 0
+            oss_service = OSSService()
+
+            for att in attachments:
+                try:
+                    oss_service.delete_file(att.oss_key)
+                    await db.delete(att)
+                    deleted_count += 1
+                except Exception as e:
+                    logger.error(f"删除过期附件失败 {att.oss_key}: {str(e)}")
+
+            await db.commit()
+            return {"deleted_attachments": deleted_count, "retention_days": retention_days}
+        except Exception as e:
+            logger.error(f"删除过期附件任务失败: {str(e)}")
+            raise

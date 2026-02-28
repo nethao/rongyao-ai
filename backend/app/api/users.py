@@ -80,7 +80,7 @@ async def update_user(
     """更新用户角色"""
     auth_service = AuthService(db)
     try:
-        user = await auth_service.update_user(user_id, role=body.role)
+        user = await auth_service.update_user(user_id, role=body.role, display_name=body.display_name)
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
         return UserSchema.model_validate(user)

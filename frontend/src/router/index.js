@@ -47,6 +47,18 @@ const router = createRouter({
           path: 'analytics',
           name: 'analytics',
           component: () => import('../views/AnalyticsView.vue'),
+          meta: { requiresAuth: true, requiresAdmin: true }
+        },
+        {
+          path: 'duplicate-logs',
+          name: 'duplicate-logs',
+          component: () => import('../views/DuplicateLogsView.vue'),
+          meta: { requiresAuth: true, requiresAdmin: true }
+        },
+        {
+          path: 'profile',
+          name: 'profile',
+          component: () => import('../views/ProfileView.vue'),
           meta: { requiresAuth: true }
         }
       ]
@@ -77,6 +89,7 @@ router.beforeEach((to, from, next) => {
     return
   }
 
+  // 编辑人员首次可引导至个人中心完善文编映射（可选：若需要强制首次填写，可在此判断并 next({ name: 'profile', query: { first: '1' } })）
   next()
 })
 

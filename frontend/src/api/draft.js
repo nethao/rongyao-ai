@@ -61,3 +61,19 @@ export function restoreAIVersion(id) {
     method: 'post'
   })
 }
+
+/**
+ * 上传Word文档并转换为可编辑内容
+ * @param {number} id - 草稿ID
+ * @param {File} file - Word文件
+ */
+export function uploadWordToDraft(id, file) {
+  const formData = new FormData()
+  formData.append('word_file', file)
+  return request({
+    url: `/drafts/${id}/upload-word`,
+    method: 'post',
+    data: formData,
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}

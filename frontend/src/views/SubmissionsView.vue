@@ -1,85 +1,18 @@
 <template>
   <div class="submissions-container">
     <el-card class="header-card">
-      <div class="header-content">
+      <!-- 第一行：标题 + 三个主操作按钮，保证「手动发布」始终可见 -->
+      <div class="header-row header-row-actions">
         <h2>投稿列表</h2>
-        <div class="header-actions">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="搜索投稿内容..."
-            style="width: 200px; margin-right: 10px"
-            clearable
-            @clear="handleSearch"
-            @keyup.enter="handleSearch"
+        <div class="action-buttons">
+          <el-button 
+            v-if="selectedSubmissions.length > 0"
+            type="danger" 
+            @click="handleBatchDelete"
           >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-          <el-select
-            v-model="editorFilter"
-            placeholder="采编筛选"
-            style="width: 150px; margin-right: 10px"
-            clearable
-            @change="handleSearch"
-          >
-            <el-option
-              v-for="editor in editorList"
-              :key="editor"
-              :label="editor"
-              :value="editor"
-            />
-          </el-select>
-          <el-select
-            v-model="cooperationFilter"
-            placeholder="合作方式"
-            style="width: 120px; margin-right: 10px"
-            clearable
-            @change="handleSearch"
-          >
-            <el-option label="投稿" value="free" />
-            <el-option label="合作" value="partner" />
-          </el-select>
-          <el-select
-            v-model="mediaFilter"
-            placeholder="媒体筛选"
-            style="width: 130px; margin-right: 10px"
-            clearable
-            @change="handleSearch"
-          >
-            <el-option label="荣耀网" value="rongyao" />
-            <el-option label="时代网" value="shidai" />
-            <el-option label="争先网" value="zhengxian" />
-            <el-option label="政企网" value="zhengqi" />
-            <el-option label="今日头条" value="toutiao" />
-          </el-select>
-          <el-select
-            v-model="unitFilter"
-            placeholder="来稿单位"
-            style="width: 150px; margin-right: 10px"
-            clearable
-            filterable
-            @change="handleSearch"
-          >
-            <el-option
-              v-for="unit in unitList"
-              :key="unit"
-              :label="unit"
-              :value="unit"
-            />
-          </el-select>
-          <el-select
-            v-model="statusFilter"
-            placeholder="状态筛选"
-            style="width: 120px; margin-right: 10px"
-            clearable
-            @change="handleSearch"
-          >
-            <el-option label="待处理" value="pending" />
-            <el-option label="处理中" value="processing" />
-            <el-option label="已完成" value="completed" />
-            <el-option label="失败" value="failed" />
-          </el-select>
+            <el-icon><Delete /></el-icon>
+            批量删除 ({{ selectedSubmissions.length }})
+          </el-button>
           <el-button type="primary" @click="handleRefresh">
             <el-icon><Refresh /></el-icon>
             刷新
@@ -94,9 +27,99 @@
           </el-button>
           <el-button type="warning" @click="openManualCreateDialog">
             <el-icon><Edit /></el-icon>
-            手动发布
+            手动发稿
           </el-button>
         </div>
+      </div>
+      <!-- 第二行：筛选条件 -->
+      <div class="header-row header-row-filters">
+        <el-date-picker
+          v-model="dateRange"
+          type="daterange"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          value-format="YYYY-MM-DD"
+          clearable
+          class="filter-date"
+          @change="handleSearch"
+        />
+        <el-input
+          v-model="searchKeyword"
+          placeholder="搜索投稿内容..."
+          class="filter-input"
+          clearable
+          @clear="handleSearch"
+          @keyup.enter="handleSearch"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <el-select
+          v-model="editorFilter"
+          placeholder="采编筛选"
+          class="filter-select"
+          clearable
+          @change="handleSearch"
+        >
+          <el-option
+            v-for="editor in editorList"
+            :key="editor"
+            :label="editor"
+            :value="editor"
+          />
+        </el-select>
+        <el-select
+          v-model="cooperationFilter"
+          placeholder="合作方式"
+          class="filter-select"
+          clearable
+          @change="handleSearch"
+        >
+          <el-option label="投稿" value="free" />
+          <el-option label="合作" value="partner" />
+        </el-select>
+        <el-select
+          v-model="mediaFilter"
+          placeholder="媒体筛选"
+          class="filter-select"
+          clearable
+          @change="handleSearch"
+        >
+          <el-option label="荣耀网" value="rongyao" />
+          <el-option label="时代网" value="shidai" />
+          <el-option label="争先网" value="zhengxian" />
+          <el-option label="政企网" value="zhengqi" />
+          <el-option label="今日头条" value="toutiao" />
+        </el-select>
+        <el-select
+          v-model="unitFilter"
+          placeholder="来稿单位"
+          class="filter-select filter-select-unit"
+          clearable
+          filterable
+          @change="handleSearch"
+        >
+          <el-option
+            v-for="unit in unitList"
+            :key="unit"
+            :label="unit"
+            :value="unit"
+          />
+        </el-select>
+        <el-select
+          v-model="statusFilter"
+          placeholder="状态筛选"
+          class="filter-select"
+          clearable
+          @change="handleSearch"
+        >
+          <el-option label="待处理" value="pending" />
+          <el-option label="处理中" value="processing" />
+          <el-option label="已完成" value="completed" />
+          <el-option label="失败" value="failed" />
+        </el-select>
       </div>
       <!-- 邮件抓取进度 -->
       <div v-if="emailFetchStatus" class="email-fetch-status" style="margin-top: 16px;">
@@ -130,12 +153,24 @@
     <el-card class="table-card">
       <el-table
         v-loading="loading"
-        :data="submissions"
+        :data="submissionsWithDateRows"
         row-key="id"
         style="width: 100%"
         @row-click="handleRowClick"
+        @selection-change="handleSelectionChange"
+        :row-class-name="getRowClassName"
+        :span-method="spanMethod"
       >
-        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column type="selection" width="55" :selectable="isRowSelectable" />
+        <el-table-column prop="id" label="ID" width="70">
+          <template #default="{ row }">
+            <span v-if="row.isDateRow" style="font-size: 14px; color: #303133;">
+              {{ row.dateDisplay }} - 共 {{ row.count }} 篇稿件
+              <span class="date-row-tip">今日已统计结束</span>
+            </span>
+            <span v-else>{{ row.id }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="email_from" label="采编" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.email_from || '-' }}
@@ -159,18 +194,23 @@
           <template #default="{ row }">
             <div style="display: flex; align-items: center; gap: 6px;">
               <!-- 来源图标 -->
-              <img v-if="row.content_source === 'weixin'" src="/icons/weixin.svg" alt="微信公众号" title="微信公众号" style="width: 18px; height: 18px;" />
-              <img v-else-if="row.content_source === 'meipian'" src="/icons/meipian.svg" alt="美篇" title="美篇" style="width: 18px; height: 18px;" />
-              <img v-else-if="row.content_source === 'doc' || row.content_source === 'docx'" src="/icons/WORD.svg" alt="Word文档" title="Word文档" style="width: 18px; height: 18px;" />
-              <img v-else-if="row.content_source === 'text'" src="/icons/text.svg" alt="纯文本" title="纯文本" style="width: 18px; height: 18px;" />
-              <span>{{ row.email_subject }}</span>
+              <img v-if="normalizeContentSource(row.content_source) === 'weixin'" src="/icons/weixin.svg" alt="微信公众号" title="微信公众号" style="width: 18px; height: 18px;" />
+              <img v-else-if="normalizeContentSource(row.content_source) === 'meipian'" src="/icons/meipian.svg" alt="美篇" title="美篇" style="width: 18px; height: 18px;" />
+              <img v-else-if="normalizeContentSource(row.content_source) === 'doc' || normalizeContentSource(row.content_source) === 'docx'" src="/icons/WORD.svg" alt="Word文档" title="Word文档" style="width: 18px; height: 18px;" />
+              <img v-else-if="normalizeContentSource(row.content_source) === 'video'" :src="mp4IconUrl" alt="视频" title="视频" style="width: 18px; height: 18px;" />
+              <img v-else-if="normalizeContentSource(row.content_source) === 'archive'" :src="archiveIconUrl" alt="压缩包" title="压缩包" style="width: 18px; height: 18px;" />
+              <img v-else-if="normalizeContentSource(row.content_source) === 'large_attachment'" :src="largeAttachmentIconUrl" alt="超大附件" title="超大附件" style="width: 18px; height: 18px;" />
+              <img v-else-if="normalizeContentSource(row.content_source) === 'other_url'" :src="webIconUrl" alt="其他链接" title="其他链接" style="width: 18px; height: 18px;" />
+              <img v-else-if="normalizeContentSource(row.content_source) === 'text'" src="/icons/text.svg" alt="纯文本" title="纯文本" style="width: 18px; height: 18px;" />
+              <span :style="needsManualEdit(row) && !hasPublished(row) ? 'font-weight: 600; color: #E6A23C;' : ''">{{ row.email_subject }}</span>
+              <el-tag v-if="needsManualEdit(row) && !hasPublished(row)" type="info" size="small">待处理</el-tag>
             </div>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">
-              {{ getStatusText(row.status) }}
+            <el-tag :type="getStatusTypeByRow(row)" size="small">
+              {{ getStatusTextByRow(row) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -210,47 +250,42 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column prop="email_date" label="邮件时间" width="160" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ formatDate(row.email_date) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="160">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="340" fixed="right">
+        <el-table-column label="操作" width="320" fixed="right">
           <template #default="{ row }">
-            <!-- 有草稿：查看草稿 + AI转换 -->
-            <template v-if="row.drafts && row.drafts.length > 0">
-              <el-button
-                type="primary"
-                size="small"
-                @click.stop="handleViewDraft(row)"
-                :disabled="!row.can_edit"
-              >
-                查看草稿
-              </el-button>
-              <el-button
-                type="success"
-                size="small"
-                @click.stop="handleTransform(row)"
-                :disabled="!row.can_edit"
-              >
-                AI转换
-              </el-button>
-            </template>
-            <!-- 无草稿：仅AI转换 -->
+            <div class="op-cell">
             <el-button
-              v-else
-              type="success"
+              v-if="!row.claimed_by_label"
+              type="warning"
               size="small"
-              @click.stop="handleTransform(row)"
+              @click.stop="handleClaim(row)"
+            >
+              认领
+            </el-button>
+            <span v-else class="claimed-badge">
+              <el-icon class="claimed-icon"><User /></el-icon>
+              {{ row.claimed_by_label }}
+            </span>
+            <!-- 有草稿：查看草稿 -->
+            <el-button
+              v-if="row.drafts && row.drafts.length > 0"
+              type="primary"
+              size="small"
+              @click.stop="handleViewDraft(row)"
               :disabled="!row.can_edit"
             >
-              AI转换
+              查看草稿
             </el-button>
-            <el-button
-              type="info"
-              size="small"
-              @click.stop="handleViewDetail(row)"
-            >
+            <el-button type="info" size="small" @click.stop="handleViewDetail(row)">
               详情
             </el-button>
             <el-button
@@ -261,6 +296,7 @@
             >
               删除
             </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -291,8 +327,8 @@
             {{ currentSubmission.id }}
           </el-descriptions-item>
           <el-descriptions-item label="状态">
-            <el-tag :type="getStatusType(currentSubmission.status)">
-              {{ getStatusText(currentSubmission.status) }}
+            <el-tag :type="getStatusTypeByRow(currentSubmission)">
+              {{ getStatusTextByRow(currentSubmission) }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="邮件主题">
@@ -351,10 +387,10 @@
       </div>
     </el-dialog>
 
-    <!-- 手动创建投稿对话框 -->
+    <!-- 手动发稿：公众号/美篇/Word 创建投稿 -->
     <el-dialog
       v-model="manualCreateDialogVisible"
-      title="手动发布稿件"
+      title="手动发稿"
       width="900px"
       :close-on-click-modal="false"
       @closed="resetManualCreateForm"
@@ -366,19 +402,20 @@
             <el-radio-group v-model="manualCreateForm.article_type" @change="handleArticleTypeChange">
               <el-radio value="weixin">公众号</el-radio>
               <el-radio value="meipian">美篇</el-radio>
+              <el-radio value="other_url">其他链接</el-radio>
               <el-radio value="word">Word文档</el-radio>
             </el-radio-group>
           </el-form-item>
           
-          <!-- 公众号和美篇：链接输入 -->
-          <el-form-item 
-            v-if="manualCreateForm.article_type === 'weixin' || manualCreateForm.article_type === 'meipian'"
-            label="文章链接" 
+          <!-- 公众号、美篇、其他链接：链接输入 -->
+          <el-form-item
+            v-if="manualCreateForm.article_type === 'weixin' || manualCreateForm.article_type === 'meipian' || manualCreateForm.article_type === 'other_url'"
+            label="文章链接"
             prop="article_url"
           >
-            <el-input 
-              v-model="manualCreateForm.article_url" 
-              :placeholder="manualCreateForm.article_type === 'weixin' ? '请输入公众号文章链接' : '请输入美篇文章链接'"
+            <el-input
+              v-model="manualCreateForm.article_url"
+              :placeholder="manualCreateForm.article_type === 'weixin' ? '请输入公众号文章链接' : manualCreateForm.article_type === 'meipian' ? '请输入美篇文章链接' : '请输入网页链接'"
               clearable
             />
           </el-form-item>
@@ -474,7 +511,7 @@
               {{ manualCreateForm.article_type === 'word' ? '解析文档' : '获取内容' }}
             </span>
             <span v-else>
-              {{ manualCreateForm.article_type === 'word' ? '解析中，请稍候...' : '获取中，正在下载图片...' }}
+              {{ manualCreateForm.article_type === 'word' ? '解析中，请稍候...' : '获取中，正在抓取内容...' }}
             </span>
           </el-button>
         </div>
@@ -498,12 +535,126 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, Picture, VideoCamera, Document, Message, Edit } from '@element-plus/icons-vue'
-import { getSubmissions, triggerTransform, deleteSubmission, createSubmission, previewContent } from '../api/submission'
+import { Search, Refresh, Picture, VideoCamera, Document, Message, Edit, Delete, User } from '@element-plus/icons-vue'
+import { getSubmissions, triggerTransform, deleteSubmission, createSubmission, previewContent, claimSubmission } from '../api/submission'
+import { getUserInfo } from '../utils/auth'
 import TiptapEditor from '../components/TiptapEditor.vue'
 import { triggerFetchEmails, getFetchEmailsStatus } from '../api/monitoring'
 
 const router = useRouter()
+
+// 计算稿件所属日期：当日 14:01 至次日 14:00 归为「次日」的稿件
+// 例：1月1日 14:01 ～ 1月2日 14:00 → 1月2日；1月2日 14:01 ～ 1月3日 14:00 → 1月3日
+const getSubmissionDate = (createdAt) => {
+  if (!createdAt) return null
+  const d = new Date(createdAt)
+  const dateOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const cutoff = new Date(dateOnly)
+  cutoff.setHours(14, 0, 0, 0)
+  if (d <= cutoff) {
+    return dateOnly.toISOString().split('T')[0]
+  }
+  dateOnly.setDate(dateOnly.getDate() + 1)
+  return dateOnly.toISOString().split('T')[0]
+}
+
+// 格式化日期显示
+const formatSubmissionDate = (dateStr) => {
+  const date = new Date(dateStr)
+  const today = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  
+  const dateOnly = date.toISOString().split('T')[0]
+  const todayStr = today.toISOString().split('T')[0]
+  const yesterdayStr = yesterday.toISOString().split('T')[0]
+  
+  const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  const weekDay = weekDays[date.getDay()]
+  
+  if (dateOnly === todayStr) {
+    return `今天 ${date.getMonth() + 1}月${date.getDate()}日 ${weekDay}`
+  } else if (dateOnly === yesterdayStr) {
+    return `昨天 ${date.getMonth() + 1}月${date.getDate()}日 ${weekDay}`
+  } else {
+    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${weekDay}`
+  }
+}
+
+// 将投稿列表按日期分组，并插入日期行
+const submissionsWithDateRows = computed(() => {
+  if (!submissions.value || submissions.value.length === 0) return []
+  
+  const grouped = {}
+  
+  // 按日期分组
+  submissions.value.forEach(sub => {
+    const dateKey = getSubmissionDate(sub.created_at)
+    if (!dateKey) return
+    
+    if (!grouped[dateKey]) {
+      grouped[dateKey] = []
+    }
+    grouped[dateKey].push(sub)
+  })
+  
+  // 按日期排序（最新的在前）
+  const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
+  
+  // 构建带日期行的列表
+  const result = []
+  sortedDates.forEach(dateKey => {
+    // 插入日期分隔行
+    result.push({
+      isDateRow: true,
+      dateKey,
+      dateDisplay: formatSubmissionDate(dateKey),
+      count: grouped[dateKey].length,
+      id: `date-${dateKey}` // 用于row-key
+    })
+    // 插入该日期的所有投稿
+    result.push(...grouped[dateKey])
+  })
+  
+  return result
+})
+
+// 判断行是否可选（日期行不可选）
+const isRowSelectable = (row) => {
+  return !row.isDateRow
+}
+
+// 设置行样式
+const getRowClassName = ({ row }) => {
+  if (row.isDateRow) {
+    return 'date-row'
+  }
+  return ''
+}
+
+// 合并单元格（日期行合并所有列）
+const spanMethod = ({ row, columnIndex }) => {
+  if (row.isDateRow) {
+    if (columnIndex === 1) { // 从第二列（ID列）开始合并
+      return [1, 11] // 合并剩余11列（含邮件时间）
+    } else if (columnIndex === 0) {
+      return [1, 1] // 选择框列保持原样
+    }
+    return [0, 0]
+  }
+}
+// 来源图标路径
+const webIconUrl     = import.meta.env.BASE_URL + 'icons/web.svg'
+const mp4IconUrl     = import.meta.env.BASE_URL + 'icons/mp4.svg'
+const archiveIconUrl = import.meta.env.BASE_URL + 'icons/archive.svg'
+const largeAttachmentIconUrl = import.meta.env.BASE_URL + 'icons/large-attachment.svg'
+const normalizeContentSource = (source) => String(source || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+
+// 判断是否需要人工编辑
+const needsManualEdit = (row) => {
+  const source = normalizeContentSource(row.content_source)
+  return ['other_url', 'large_attachment', 'video', 'archive'].includes(source)
+}
 
 // 数据
 const loading = ref(false)
@@ -512,11 +663,13 @@ const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const searchKeyword = ref('')
+const dateRange = ref(null)
 const statusFilter = ref('')
 const editorFilter = ref('')
 const cooperationFilter = ref('')
 const mediaFilter = ref('')
 const unitFilter = ref('')
+const selectedSubmissions = ref([])
 
 // 筛选选项列表
 const editorList = ref([])
@@ -567,7 +720,8 @@ const previewRules = {
   article_url: [
     { 
       validator: (rule, value, callback) => {
-        if (manualCreateForm.value.article_type === 'weixin' || manualCreateForm.value.article_type === 'meipian') {
+        const needsUrl = ['weixin', 'meipian', 'other_url'].includes(manualCreateForm.value.article_type)
+        if (needsUrl) {
           if (!value || !value.trim()) {
             callback(new Error('请输入文章链接'))
           } else {
@@ -687,7 +841,7 @@ const handlePreviewContent = async () => {
       const formData = new FormData()
       formData.append('article_type', manualCreateForm.value.article_type)
       
-      if (manualCreateForm.value.article_type === 'weixin' || manualCreateForm.value.article_type === 'meipian') {
+      if (['weixin', 'meipian', 'other_url'].includes(manualCreateForm.value.article_type)) {
         if (!manualCreateForm.value.article_url) {
           ElMessage.warning('请输入文章链接')
           manualCreatePreviewing.value = false
@@ -745,6 +899,7 @@ const submitManualCreate = async () => {
     
     manualCreateSubmitting.value = true
     try {
+      const isOtherUrl = manualCreateForm.value.content_source === 'other_url'
       const response = await createSubmission({
         title: manualCreateForm.value.email_subject,
         content: manualCreateForm.value.original_content,
@@ -756,8 +911,12 @@ const submitManualCreate = async () => {
         media_type: manualCreateForm.value.media_type,
         source_unit: manualCreateForm.value.source_unit
       })
-      ElMessage.success('创建成功')
       manualCreateDialogVisible.value = false
+      if (isOtherUrl) {
+        ElMessage.success('创建成功，AI自动采集已启动')
+      } else {
+        ElMessage.success('创建成功')
+      }
       // 跳转到审核页面（使用第一个草稿）
       if (response.drafts && response.drafts.length > 0) {
         router.push({ name: 'audit', params: { draftId: response.drafts[0].id } })
@@ -882,6 +1041,10 @@ const loadSubmissions = async () => {
     if (unitFilter.value) {
       params.unit = unitFilter.value
     }
+    if (dateRange.value && dateRange.value.length === 2) {
+      params.start_date = dateRange.value[0]
+      params.end_date = dateRange.value[1]
+    }
 
     const response = await getSubmissions(params)
     submissions.value = response.items
@@ -921,8 +1084,16 @@ const handleSizeChange = (size) => {
   loadSubmissions()
 }
 
-// 行点击：优先打开草稿，无草稿则打开详情
+// 多选处理
+const handleSelectionChange = (selection) => {
+  selectedSubmissions.value = selection
+}
+
+// 行点击：优先打开草稿,无草稿则打开详情
 const handleRowClick = (row) => {
+  // 日期行不响应点击
+  if (row.isDateRow) return
+  
   if (row.drafts && row.drafts.length > 0) {
     handleViewDraft(row)
   } else {
@@ -937,14 +1108,45 @@ const handleViewDetail = (row) => {
 }
 
 // 查看草稿
-const handleViewDraft = (row) => {
-  // 获取第一个草稿的ID
-  if (row.drafts && row.drafts.length > 0) {
-    const draftId = row.drafts[0].id
-    router.push({ name: 'audit', params: { draftId } })
-  } else {
-    ElMessage.warning('该投稿还没有生成草稿')
+const handleClaim = async (row) => {
+  try {
+    await claimSubmission(row.id)
+    ElMessage.success('认领成功')
+    loadSubmissions()
+  } catch (error) {
+    const msg = error.response?.data?.detail || error.message || '认领失败'
+    ElMessage.error(msg)
   }
+}
+
+const doNavigateToDraft = (row) => {
+  const draftId = row.drafts[0].id
+  router.push({ name: 'audit', params: { draftId } })
+}
+
+const handleViewDraft = async (row) => {
+  if (!row.drafts || row.drafts.length === 0) {
+    ElMessage.warning('该投稿还没有生成草稿')
+    return
+  }
+  const currentUser = getUserInfo()
+  const claimedByOther = row.claimed_by_label && row.claimed_by_user_id && currentUser?.id !== row.claimed_by_user_id
+  if (claimedByOther) {
+    const timeStr = row.claimed_at ? formatClaimTime(row.claimed_at) : ''
+    const msg = timeStr
+      ? `该稿件${timeStr}由 ${row.claimed_by_label} 认领，是否继续编辑？`
+      : `该稿件已由 ${row.claimed_by_label} 认领，是否继续编辑？`
+    try {
+      await ElMessageBox.confirm(msg, '提示', {
+        confirmButtonText: '继续编辑',
+        cancelButtonText: '取消',
+        type: 'warning'
+      })
+    } catch {
+      return
+    }
+  }
+  doNavigateToDraft(row)
 }
 
 // 触发AI转换
@@ -993,6 +1195,35 @@ const handleDelete = async (row) => {
     if (error !== 'cancel') {
       const msg = error.response?.data?.detail || error.message || '未知错误'
       ElMessage.error('删除失败: ' + msg)
+    }
+  }
+}
+
+// 批量删除
+const handleBatchDelete = async () => {
+  if (selectedSubmissions.value.length === 0) return
+  
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedSubmissions.value.length} 条投稿吗？删除后无法恢复。`,
+      '确认批量删除',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    
+    const deletePromises = selectedSubmissions.value.map(row => deleteSubmission(row.id))
+    await Promise.all(deletePromises)
+    
+    ElMessage.success(`成功删除 ${selectedSubmissions.value.length} 条投稿`)
+    selectedSubmissions.value = []
+    loadSubmissions()
+  } catch (error) {
+    if (error !== 'cancel') {
+      const msg = error.response?.data?.detail || error.message || '未知错误'
+      ElMessage.error('批量删除失败: ' + msg)
     }
   }
 }
@@ -1085,6 +1316,20 @@ const getStatusText = (status) => {
   return textMap[status] || status
 }
 
+const hasPublished = (row) => {
+  return Array.isArray(row?.drafts) && row.drafts.some(d => d.status === 'published')
+}
+
+const getStatusTypeByRow = (row) => {
+  if (hasPublished(row)) return 'primary'
+  return getStatusType(row?.status)
+}
+
+const getStatusTextByRow = (row) => {
+  if (hasPublished(row)) return '已发布'
+  return getStatusText(row?.status)
+}
+
 // 格式化日期
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
@@ -1096,6 +1341,18 @@ const formatDate = (dateStr) => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+// 格式化认领时间：yy-m-d 00:00（如 26-2-28 16:15）
+const formatClaimTime = (dateStr) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  const yy = String(date.getFullYear()).slice(-2)
+  const m = date.getMonth() + 1
+  const d = date.getDate()
+  const h = String(date.getHours()).padStart(2, '0')
+  const min = String(date.getMinutes()).padStart(2, '0')
+  return `${yy}-${m}-${d} ${h}:${min}`
 }
 
 // 初始化
@@ -1113,21 +1370,50 @@ onMounted(() => {
   margin-bottom: 20px;
 }
 
-.header-content {
+.header-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
-.header-content h2 {
+.header-row-actions {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.header-row-actions h2 {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
 }
 
-.header-actions {
+.action-buttons {
   display: flex;
   align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.header-row-filters {
+  padding-top: 8px;
+  border-top: 1px solid #ebeef5;
+}
+
+.filter-input {
+  width: 200px;
+}
+
+.filter-date {
+  width: 260px;
+}
+
+.filter-select {
+  width: 120px;
+}
+
+.filter-select-unit {
+  width: 150px;
 }
 
 .table-card {
@@ -1198,6 +1484,58 @@ onMounted(() => {
 
 :deep(.el-table__row:hover) {
   background-color: #f5f7fa;
+}
+
+/* 日期分隔行样式 */
+:deep(.date-row) {
+  background: linear-gradient(to right, #e8f4fd, #f5f7fa) !important;
+  font-weight: 600;
+  font-size: 14px;
+  color: #303133;
+  cursor: default !important;
+}
+
+:deep(.date-row:hover) {
+  background: linear-gradient(to right, #e8f4fd, #f5f7fa) !important;
+}
+
+:deep(.date-row td) {
+  padding: 14px 0 !important;
+  text-align: left !important;
+  padding-left: 20px !important;
+  border-bottom: 2px solid #409eff !important;
+  border-top: 2px solid #409eff !important;
+}
+
+.date-row-tip {
+  margin-left: 10px;
+  color: #f56c6c;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* 操作列：按钮与认领信息统一布局 */
+.op-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.claimed-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #67c23a;
+  background: #f0f9eb;
+  border-radius: 4px;
+  border: 1px solid #e1f3d8;
+}
+
+.claimed-badge .claimed-icon {
+  font-size: 12px;
 }
 
 /* 附件列：徽章数字不错位、不裁切 */

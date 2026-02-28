@@ -1,6 +1,7 @@
 """
 投稿管理API端点
 """
+from datetime import datetime, time
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
@@ -13,6 +14,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.submission import Submission
 from app.models.task_log import TaskLog
+from app.models.duplicate_log import DuplicateLog
 from app.schemas.submission import SubmissionSchema, SubmissionListResponse, ManualSubmissionCreate, ContentPreviewResponse, ManualSubmissionCreateFromPreview
 from app.api.dependencies import get_current_user, require_admin
 from app.tasks.transform_tasks import transform_content_task
@@ -201,6 +203,39 @@ async def preview_content(
                 # 清理临时文件
                 if os.path.exists(temp_file.name):
                     os.unlink(temp_file.name)
+        elif article_type == "other_url":
+            # 抓取其他网页链接
+            if not article_url:
+                raise HTTPException(status_code=400, detail="其他链接类型需要提供文章链接")
+
+            fetcher = WebFetcher()
+            fetched_title, fetched_content, image_urls, fetched_html = await fetcher.fetch_generic_url_async(article_url)
+
+            if not fetched_content:
+                raise HTTPException(status_code=400, detail="无法从链接获取文章内容，请检查链接是否正确")
+
+            title = fetched_title or "无标题"
+            original_html = fetched_html
+            content_source = "other_url"
+            content = fetched_content
+
+            # 下载并上传图片，构建media_map
+            for idx, img_url in enumerate(image_urls):
+                try:
+                    img_data = fetcher.download_image(img_url)
+                    if img_data:
+                        oss_url, oss_key = oss_service.upload_file(
+                            file_data=img_data,
+                            filename=f"preview_other_{idx}.jpg",
+                            folder='images'
+                        )
+                        placeholder = f"[[IMG_{idx}]]"
+                        media_map[placeholder] = oss_url
+                        logger.info(f"预览上传图片 {idx}: {oss_url}")
+                except Exception as e:
+                    logger.error(f"预览上传图片失败 {idx}: {e}")
+
+            image_count = len(media_map)
         else:
             raise HTTPException(status_code=400, detail=f"不支持的文章类型: {article_type}")
         
@@ -289,7 +324,12 @@ async def create_submission(
         
         db.add(draft)
         await db.commit()
-        
+
+        # 其他链接自动触发 AI 转换
+        if body.content_source == "other_url":
+            transform_content_task.delay(submission.id)
+            logger.info(f"已自动触发AI转换任务，submission_id={submission.id}")
+
         # 重新加载 submission 以包含 drafts
         result = await db.execute(
             select(Submission)
@@ -297,7 +337,7 @@ async def create_submission(
             .where(Submission.id == submission.id)
         )
         submission = result.scalar_one()
-        
+
         return submission
     
     except HTTPException:
@@ -317,6 +357,8 @@ async def list_submissions(
     cooperation: Optional[str] = Query(None, description="合作方式筛选"),
     media: Optional[str] = Query(None, description="媒体类型筛选"),
     unit: Optional[str] = Query(None, description="来稿单位筛选"),
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -329,7 +371,11 @@ async def list_submissions(
     logger = logging.getLogger(__name__)
 
     # 构建公共 where 条件（用于 count 与分页查询）
-    base = select(Submission)
+    # 排除被新稿替换的旧稿（duplicate_logs.superseded_submission_id）
+    superseded_ids = select(DuplicateLog.superseded_submission_id).where(
+        DuplicateLog.superseded_submission_id.isnot(None)
+    )
+    base = select(Submission).where(~Submission.id.in_(superseded_ids))
 
     if status:
         base = base.where(Submission.status == status)
@@ -341,6 +387,18 @@ async def list_submissions(
         base = base.where(Submission.media_type == media)
     if unit:
         base = base.where(Submission.source_unit == unit)
+    if start_date:
+        try:
+            sd = datetime.strptime(start_date, "%Y-%m-%d").date()
+            base = base.where(Submission.created_at >= datetime.combine(sd, time.min))
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            ed = datetime.strptime(end_date, "%Y-%m-%d").date()
+            base = base.where(Submission.created_at <= datetime.combine(ed, time.max))
+        except ValueError:
+            pass
     if search:
         search_pattern = f"%{search}%"
         base = base.where(
@@ -351,8 +409,12 @@ async def list_submissions(
             )
         )
 
-    # 总数：直接 count(Submission.id)，避免 subquery
-    count_stmt = select(func.count(Submission.id)).select_from(Submission)
+    # 总数：直接 count(Submission.id)，排除被替换的旧稿
+    count_stmt = (
+        select(func.count(Submission.id))
+        .select_from(Submission)
+        .where(~Submission.id.in_(superseded_ids))
+    )
     if status:
         count_stmt = count_stmt.where(Submission.status == status)
     if editor:
@@ -363,6 +425,18 @@ async def list_submissions(
         count_stmt = count_stmt.where(Submission.media_type == media)
     if unit:
         count_stmt = count_stmt.where(Submission.source_unit == unit)
+    if start_date:
+        try:
+            sd = datetime.strptime(start_date, "%Y-%m-%d").date()
+            count_stmt = count_stmt.where(Submission.created_at >= datetime.combine(sd, time.min))
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            ed = datetime.strptime(end_date, "%Y-%m-%d").date()
+            count_stmt = count_stmt.where(Submission.created_at <= datetime.combine(ed, time.max))
+        except ValueError:
+            pass
     if search:
         search_pattern = f"%{search}%"
         count_stmt = count_stmt.where(
@@ -386,6 +460,7 @@ async def list_submissions(
         .options(
             selectinload(Submission.images),
             selectinload(Submission.drafts),
+            selectinload(Submission.claimed_by_user),
         )
     )
     try:
@@ -399,11 +474,15 @@ async def list_submissions(
     items = []
     for sub in submissions:
         sub_dict = SubmissionSchema.model_validate(sub).model_dump()
-        # 编辑人员只能编辑状态为completed的投稿
-        if current_user.role == 'editor':
-            sub_dict['can_edit'] = sub.status == 'completed'
+        if sub.claimed_by_user:
+            label = (sub.claimed_by_user.display_name or "").strip() or sub.claimed_by_user.username
+            sub_dict["claimed_by_label"] = label
         else:
-            sub_dict['can_edit'] = True
+            sub_dict["claimed_by_label"] = None
+        if current_user.role == "editor":
+            sub_dict["can_edit"] = sub.status == "completed"
+        else:
+            sub_dict["can_edit"] = True
         items.append(SubmissionSchema(**sub_dict))
 
     try:
@@ -418,23 +497,84 @@ async def list_submissions(
         raise HTTPException(status_code=500, detail=f"序列化投稿列表失败: {str(e)}")
 
 
+@router.post("/{submission_id}/claim", response_model=SubmissionSchema)
+async def claim_submission(
+    submission_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    认领投稿：编辑人员点击认领后打上自己的标签（display_name 或 username）
+    """
+    from sqlalchemy.orm import selectinload
+
+    result = await db.execute(select(Submission).where(Submission.id == submission_id))
+    submission = result.scalar_one_or_none()
+    if not submission:
+        raise HTTPException(status_code=404, detail="投稿不存在")
+
+    from datetime import datetime, timezone
+    submission.claimed_by_user_id = current_user.id
+    submission.claimed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    result = await db.execute(
+        select(Submission)
+        .where(Submission.id == submission_id)
+        .options(
+            selectinload(Submission.images),
+            selectinload(Submission.drafts),
+            selectinload(Submission.claimed_by_user),
+        )
+    )
+    submission = result.scalar_one()
+
+    sub_dict = SubmissionSchema.model_validate(submission).model_dump()
+    if submission.claimed_by_user:
+        label = (submission.claimed_by_user.display_name or "").strip() or submission.claimed_by_user.username
+        sub_dict["claimed_by_label"] = label
+    else:
+        sub_dict["claimed_by_label"] = None
+    sub_dict["can_edit"] = current_user.role != "editor" or submission.status == "completed"
+
+    return SubmissionSchema(**sub_dict)
+
+
 @router.get("/{submission_id}", response_model=SubmissionSchema)
 async def get_submission(
     submission_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取投稿详情
     """
-    query = select(Submission).where(Submission.id == submission_id)
+    from sqlalchemy.orm import selectinload
+
+    query = (
+        select(Submission)
+        .where(Submission.id == submission_id)
+        .options(
+            selectinload(Submission.images),
+            selectinload(Submission.drafts),
+            selectinload(Submission.claimed_by_user),
+        )
+    )
     result = await db.execute(query)
     submission = result.scalar_one_or_none()
-    
+
     if not submission:
         raise HTTPException(status_code=404, detail="投稿不存在")
-    
-    return submission
+
+    sub_dict = SubmissionSchema.model_validate(submission).model_dump()
+    if submission.claimed_by_user:
+        label = (submission.claimed_by_user.display_name or "").strip() or submission.claimed_by_user.username
+        sub_dict["claimed_by_label"] = label
+    else:
+        sub_dict["claimed_by_label"] = None
+    sub_dict["can_edit"] = current_user.role != "editor" or submission.status == "completed"
+
+    return SubmissionSchema(**sub_dict)
 
 
 @router.delete("/{submission_id}")
@@ -451,7 +591,8 @@ async def delete_submission(
     
     # 加载投稿及其关联的图片
     query = select(Submission).options(
-        selectinload(Submission.images)
+        selectinload(Submission.images),
+        selectinload(Submission.attachments)
     ).where(Submission.id == submission_id)
     result = await db.execute(query)
     submission = result.scalar_one_or_none()
@@ -479,6 +620,20 @@ async def delete_submission(
         except Exception as e:
             failed_count += 1
             logger.error(f"删除OSS文件异常: {image.oss_url}, 错误: {e}")
+
+    # 删除OSS上的附件文件
+    for att in submission.attachments:
+        try:
+            if att.oss_key:
+                if oss_service.delete_file(att.oss_key):
+                    deleted_count += 1
+                    logger.info(f"删除OSS附件成功: {att.oss_key}")
+                else:
+                    failed_count += 1
+                    logger.warning(f"删除OSS附件失败: {att.oss_key}")
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"删除OSS附件异常: {att.oss_url}, 错误: {e}")
     
     # 删除数据库记录（级联删除图片和草稿）
     await db.delete(submission)

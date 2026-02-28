@@ -54,6 +54,12 @@ class DraftDetailSchema(DraftSchema):
     original_html: Optional[str] = None  # 公众号原始 HTML，用于还原排版
     email_subject: Optional[str] = None  # 文章标题
     content_source: Optional[str] = None  # 内容来源：weixin/meipian/word等
+    target_site_id: Optional[int] = None  # 目标WordPress站点ID
+    cooperation_type: Optional[str] = None  # 合作方式：free/partner
+    media_type: Optional[str] = None  # 媒体类型：rongyao/shidai/zhengxian/zhengqi/toutiao
+    source_unit: Optional[str] = None  # 来稿单位
+    attachments: List[Dict[str, Any]] = []  # 附件列表（含图片/视频/Word/压缩包）
+    attachment_retention_days: Optional[int] = None  # 附件默认保留天数
     
 
 class DraftVersionListResponse(BaseModel):

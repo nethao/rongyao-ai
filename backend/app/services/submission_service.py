@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.submission import Submission, SubmissionImage
+from app.models.submission_attachment import SubmissionAttachment
 from app.models.task_log import TaskLog
 import logging
 
@@ -93,6 +94,32 @@ class SubmissionService:
         
         logger.info(f"添加投稿图片: submission_id={submission_id}, url={oss_url}")
         return image
+
+    async def add_attachment(
+        self,
+        submission_id: int,
+        attachment_type: str,
+        oss_url: str,
+        oss_key: str,
+        original_filename: Optional[str] = None,
+        file_size: Optional[int] = None
+    ) -> SubmissionAttachment:
+        """
+        添加投稿附件
+        """
+        attachment = SubmissionAttachment(
+            submission_id=submission_id,
+            attachment_type=attachment_type,
+            oss_url=oss_url,
+            oss_key=oss_key,
+            original_filename=original_filename,
+            file_size=file_size
+        )
+        self.db.add(attachment)
+        await self.db.commit()
+        await self.db.refresh(attachment)
+        logger.info(f"添加投稿附件: submission_id={submission_id}, type={attachment_type}, url={oss_url}")
+        return attachment
     
     async def update_status(
         self,

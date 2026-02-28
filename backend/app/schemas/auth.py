@@ -20,6 +20,7 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     """用户更新模型"""
     role: str  # 'admin' | 'editor'
+    display_name: Optional[str] = None  # 显示名（中文姓名），认领标签优先用此
 
 
 class AdminResetPasswordRequest(BaseModel):
@@ -30,6 +31,7 @@ class AdminResetPasswordRequest(BaseModel):
 class User(UserBase):
     """用户响应模型"""
     id: int
+    display_name: Optional[str] = None  # 显示名（中文姓名），认领标签优先用此
     created_at: datetime
     
     class Config:
@@ -40,6 +42,8 @@ class LoginRequest(BaseModel):
     """登录请求"""
     username: str
     password: str
+    captcha_id: str
+    captcha_code: str
 
 
 class TokenResponse(BaseModel):

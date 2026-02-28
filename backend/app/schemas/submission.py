@@ -66,6 +66,9 @@ class SubmissionSchema(SubmissionBase):
     source_unit: Optional[str] = None  # 来稿单位
     target_site_id: Optional[int] = None  # 目标站点ID
     content_source: Optional[str] = None  # 内容来源: weixin, meipian, doc, docx, text
+    claimed_by_label: Optional[str] = None  # 认领人标签（display_name 或 username）
+    claimed_by_user_id: Optional[int] = None  # 认领人ID
+    claimed_at: Optional[datetime] = None  # 认领时间
     
     created_at: datetime
     updated_at: datetime

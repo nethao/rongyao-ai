@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import settings
-from app.api import config, auth, users, submissions, drafts, wordpress_sites, monitoring, analytics
+from app.api import config, auth, users, submissions, drafts, wordpress_sites, monitoring, analytics, media_mappings, name_mappings, duplicate_logs
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,9 @@ app.include_router(drafts.router, prefix="/api")
 app.include_router(wordpress_sites.router, prefix="/api")
 app.include_router(monitoring.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
+app.include_router(media_mappings.router, prefix="/api")
+app.include_router(name_mappings.router, prefix="/api")
+app.include_router(duplicate_logs.router, prefix="/api")
 
 
 @app.exception_handler(Exception)

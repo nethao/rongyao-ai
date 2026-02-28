@@ -1,0 +1,6 @@
+# 避免把本地 Playwright 缓存等大/无权限目录打进构建上下文
+backend/.cache
+**/.cache
+**/__pycache__
+**/.pytest_cache
+.git

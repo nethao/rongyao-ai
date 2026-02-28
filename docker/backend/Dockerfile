@@ -7,30 +7,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     libreoffice \
     libreoffice-writer \
+    p7zip-full \
+    unrar-free \
+    chromium \
     wget \
     ca-certificates \
-    fonts-liberation \
-    libappindicator3-1 \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libgdk-pixbuf-2.0-0 \
-    libnspr4 \
-    libnss3 \
-    libx11-xcb1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    xdg-utils \
-    libgbm1 \
-    libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN playwright install chromium
+
+# 安装 Playwright 浏览器和系统依赖（需在 root 用户下）
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 COPY backend/ .
 
@@ -38,6 +27,7 @@ RUN mkdir -p /tmp/glory_audit
 
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser \
     && chown -R appuser:appuser /app /tmp/glory_audit
+
 USER appuser
 
 EXPOSE 8000

@@ -188,7 +188,8 @@ class DocumentProcessor:
                         if row_text.strip():
                             text_parts.append(row_text)
             
-            content = '\n'.join(text_parts)
+            # 段落之间使用空行，避免 Markdown 渲染时并段导致排版错乱
+            content = '\n\n'.join(text_parts)
             logger.info(f"成功提取文本，长度: {len(content)}, 图片数量: {image_counter - 1}, 跳过行数: {skip_title_lines}")
             return content
         

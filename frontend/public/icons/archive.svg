@@ -1,0 +1,20 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+  <!-- 圆角背景 -->
+  <rect width="1024" height="1024" rx="128" fill="#E6A23C"/>
+  <!-- 文件轮廓 -->
+  <rect x="220" y="100" width="400" height="500" rx="32" fill="#FFFFFF" opacity="0.2"/>
+  <rect x="220" y="100" width="400" height="500" rx="32" fill="none" stroke="#FFFFFF" stroke-width="28"/>
+  <!-- 折角 -->
+  <path d="M500 100 L620 220 L500 220 Z" fill="#E6A23C"/>
+  <path d="M500 100 L620 220" stroke="#FFFFFF" stroke-width="28"/>
+  <!-- 拉链条纹（交替色块模拟拉链） -->
+  <rect x="380" y="160" width="80" height="60" rx="8" fill="#FFFFFF" opacity="0.9"/>
+  <rect x="380" y="240" width="80" height="60" rx="8" fill="#FFFFFF" opacity="0.3"/>
+  <rect x="380" y="320" width="80" height="60" rx="8" fill="#FFFFFF" opacity="0.9"/>
+  <rect x="380" y="400" width="80" height="60" rx="8" fill="#FFFFFF" opacity="0.3"/>
+  <rect x="380" y="480" width="80" height="60" rx="8" fill="#FFFFFF" opacity="0.9"/>
+  <!-- ZIP 标签底部 -->
+  <rect x="200" y="680" width="440" height="160" rx="32" fill="#FFFFFF"/>
+  <!-- ZIP 文字 -->
+  <text x="420" y="796" font-family="Arial Black, Arial" font-weight="900" font-size="120" fill="#E6A23C" text-anchor="middle">ZIP</text>
+</svg>

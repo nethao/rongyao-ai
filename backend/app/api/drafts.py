@@ -1,7 +1,7 @@
 """
 草稿管理API端点
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.draft import Draft, DraftVersion
 from app.models.submission import Submission  # 用于 selectinload(Submission.images)
+from app.models.media_site_mapping import MediaSiteMapping
 from app.schemas.draft import (
     DraftSchema,
     DraftDetailSchema,
@@ -21,6 +22,8 @@ from app.schemas.wordpress import PublishRequest, PublishResult
 from app.api.dependencies import get_current_user
 from app.services.draft_service import DraftService
 from app.services.publish_service import PublishService
+from app.services.oss_service import OSSService
+from app.config import settings
 
 router = APIRouter(prefix="/drafts", tags=["drafts"])
 
@@ -38,7 +41,8 @@ async def get_draft(
     
     # 查询草稿及关联的投稿（含投稿图片，用于 media_map 丢失时按序恢复）
     query = select(Draft).where(Draft.id == draft_id).options(
-        selectinload(Draft.submission).selectinload(Submission.images)
+        selectinload(Draft.submission).selectinload(Submission.images),
+        selectinload(Draft.submission).selectinload(Submission.attachments),
     )
     result = await db.execute(query)
     draft = result.scalar_one_or_none()
@@ -79,6 +83,41 @@ async def get_draft(
         )
     
     # 构建响应（避免 None 导致 Pydantic 校验失败）
+    # 若历史数据未写入 target_site_id，则根据 media_type 现查映射补齐
+    target_site_id = draft.submission.target_site_id
+    if target_site_id is None and draft.submission.media_type:
+        mapping_result = await db.execute(
+            select(MediaSiteMapping).where(
+                MediaSiteMapping.media_type == draft.submission.media_type
+            )
+        )
+        mapping = mapping_result.scalar_one_or_none()
+        if mapping and mapping.site_id:
+            target_site_id = mapping.site_id
+            draft.submission.target_site_id = mapping.site_id
+            await db.commit()
+
+    # 组装附件列表（图片 + 其他附件）
+    attachments = []
+    for img in (draft.submission.images or []):
+        attachments.append({
+            "id": img.id,
+            "type": "image",
+            "name": img.original_filename or "图片",
+            "url": img.oss_url,
+            "size": img.file_size,
+            "created_at": getattr(img, "created_at", None)
+        })
+    for att in (draft.submission.attachments or []):
+        attachments.append({
+            "id": att.id,
+            "type": att.attachment_type,
+            "name": att.original_filename or "附件",
+            "url": att.oss_url,
+            "size": att.file_size,
+            "created_at": att.created_at
+        })
+
     draft_dict = {
         "id": draft.id,
         "submission_id": draft.submission_id,
@@ -95,6 +134,12 @@ async def get_draft(
         "original_html": draft.submission.original_html,
         "email_subject": draft.submission.email_subject,
         "content_source": draft.submission.content_source,
+        "target_site_id": target_site_id,  # 添加目标站点ID
+        "cooperation_type": draft.submission.cooperation_type,
+        "media_type": draft.submission.media_type,
+        "source_unit": draft.submission.source_unit,
+        "attachments": attachments,
+        "attachment_retention_days": settings.ATTACHMENT_RETENTION_DAYS,
     }
     return draft_dict
 
@@ -110,6 +155,14 @@ async def update_draft(
     更新草稿内容（使用占位符协议 - Dehydration）
     """
     import logging
+    import base64
+    import time
+    import re
+    import mimetypes
+    from urllib.parse import urlparse
+    import requests
+    from bs4 import BeautifulSoup
+    from app.models.submission import SubmissionImage
     from app.utils.content_processor import ContentProcessor
 
     logger = logging.getLogger(__name__)
@@ -124,8 +177,118 @@ async def update_draft(
         raise HTTPException(status_code=404, detail="草稿不存在")
 
     try:
-        # === 占位符协议 Dehydration ===
+        def _is_oss_url(url: str) -> bool:
+            if not url:
+                return False
+            if settings.OSS_BUCKET_NAME and settings.OSS_ENDPOINT:
+                prefix = f"https://{settings.OSS_BUCKET_NAME}.{settings.OSS_ENDPOINT}/"
+                if url.startswith(prefix):
+                    return True
+            return ".aliyuncs.com/" in url
+
+        def _ext_from_content_type(content_type: str) -> str:
+            if not content_type:
+                return ""
+            ct = content_type.split(";")[0].strip().lower()
+            mapping = {
+                "image/jpeg": ".jpg",
+                "image/jpg": ".jpg",
+                "image/png": ".png",
+                "image/gif": ".gif",
+                "image/webp": ".webp",
+                "image/bmp": ".bmp",
+                "image/svg+xml": ".svg",
+                "image/tiff": ".tiff",
+            }
+            return mapping.get(ct, "")
+
+        def _ext_from_url(url: str) -> str:
+            try:
+                path = urlparse(url).path
+                ext = (mimetypes.guess_extension(mimetypes.guess_type(path)[0]) or "")
+                if ext:
+                    return ext
+                _, ext = path.rsplit(".", 1) if "." in path else ("", "")
+                return f".{ext}" if ext else ""
+            except Exception:
+                return ""
+
+        # 1) 处理外链/BASE64图片：下载/解码并上传到OSS，替换为OSS URL
         content_str = draft_update.content if draft_update.content is not None else ""
+        if content_str:
+            soup = BeautifulSoup(content_str, "html.parser")
+            oss_service = OSSService()
+            img_index = 0
+
+            for img in soup.find_all("img"):
+                src = (img.get("src") or "").strip()
+                if not src:
+                    continue
+                if _is_oss_url(src):
+                    continue
+
+                file_data = None
+                filename = None
+                content_type = None
+
+                # base64 图片
+                if src.startswith("data:image/"):
+                    m = re.match(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$", src)
+                    if not m:
+                        raise HTTPException(status_code=400, detail="图片Base64格式不正确")
+                    content_type = m.group(1)
+                    b64_data = m.group(2)
+                    try:
+                        file_data = base64.b64decode(b64_data)
+                    except Exception:
+                        raise HTTPException(status_code=400, detail="图片Base64解码失败")
+                    ext = _ext_from_content_type(content_type) or ".png"
+                    filename = f"inline_{int(time.time() * 1000)}{ext}"
+                # 外链图片
+                elif src.startswith("http://") or src.startswith("https://"):
+                    try:
+                        resp = requests.get(
+                            src,
+                            timeout=30,
+                            headers={"User-Agent": "Mozilla/5.0"}
+                        )
+                        resp.raise_for_status()
+                        file_data = resp.content
+                        content_type = resp.headers.get("Content-Type", "")
+                    except Exception as e:
+                        logger.error("下载外链图片失败: %s, err=%s", src, e)
+                        raise HTTPException(status_code=400, detail=f"下载外链图片失败: {src}")
+
+                    ext = _ext_from_content_type(content_type) or _ext_from_url(src) or ".jpg"
+                    img_index += 1
+                    filename = f"external_{int(time.time() * 1000)}_{img_index}{ext}"
+                else:
+                    # blob: 或其他未知协议，无法在后端下载
+                    raise HTTPException(status_code=400, detail=f"不支持的图片来源: {src}")
+
+                # 上传到OSS
+                oss_url, oss_key = oss_service.upload_file(
+                    file_data=file_data,
+                    filename=filename,
+                    folder=f"drafts/{draft.id}"
+                )
+
+                # 记录到投稿图片表，便于清理与统计
+                image = SubmissionImage(
+                    submission_id=draft.submission_id,
+                    oss_url=oss_url,
+                    oss_key=oss_key,
+                    original_filename=filename,
+                    file_size=len(file_data) if file_data else None
+                )
+                db.add(image)
+
+                # 替换src为OSS URL
+                img["src"] = oss_url
+
+            content_str = str(soup)
+
+        # === 占位符协议 Dehydration ===
         new_md, new_media_map = ContentProcessor.dehydrate(
             content_str,
             draft.media_map or {}
@@ -269,7 +432,8 @@ async def publish_draft(
         draft_id=draft_id,
         site_id=publish_request.site_id,
         status="publish",
-        system_username=current_user.username  # 传递系统用户名
+        system_username=current_user.username,
+        publisher_user_id=current_user.id,
     )
     
     if success:
@@ -299,3 +463,123 @@ async def get_publish_history(
     publish_service = PublishService(db)
     history = await publish_service.get_publish_history(draft_id)
     return history
+
+
+@router.post("/{draft_id}/upload-word")
+async def upload_word_for_draft(
+    draft_id: int,
+    word_file: UploadFile = File(..., description="Word文档文件"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    上传Word文档并转换为可编辑HTML（保持图文顺序）
+    """
+    import tempfile
+    import os
+    import logging
+    from app.services.document_processor import DocumentProcessor
+    from app.utils.content_processor import ContentProcessor
+    from app.models.draft import Draft
+    from app.models.submission import SubmissionImage
+    from app.models.submission_attachment import SubmissionAttachment
+
+    logger = logging.getLogger(__name__)
+
+    result = await db.execute(select(Draft).where(Draft.id == draft_id))
+    draft = result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+
+    suffix = os.path.splitext(word_file.filename or "")[1].lower()
+    if suffix not in (".doc", ".docx"):
+        raise HTTPException(status_code=400, detail="仅允许上传 .doc 或 .docx 文件")
+
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    temp_file_path = temp_file.name
+    try:
+        content_bytes = await word_file.read()
+        temp_file.write(content_bytes)
+        temp_file.close()
+
+        doc_processor = DocumentProcessor()
+        # 上传原始Word文件到OSS并记录附件
+        try:
+            word_url, word_key = oss_service.upload_file(
+                file_data=content_bytes,
+                filename=word_file.filename or f"word_upload{suffix}",
+                folder='attachments'
+            )
+            word_attachment = SubmissionAttachment(
+                submission_id=draft.submission_id,
+                attachment_type="word",
+                oss_url=word_url,
+                oss_key=word_key,
+                original_filename=word_file.filename,
+                file_size=len(content_bytes) if content_bytes else None
+            )
+            db.add(word_attachment)
+            await db.commit()
+        except Exception as e:
+            logger.error("Word原文件上传失败: %s", e)
+        docx_path = None
+        title = "无标题"
+        content_md = ""
+
+        if suffix == ".doc":
+            docx_path = doc_processor.convert_doc_to_docx(temp_file_path)
+            title, title_lines = doc_processor.extract_title_from_docx(docx_path)
+            content_md = doc_processor.extract_text_from_docx(docx_path, skip_title_lines=title_lines)
+            images = doc_processor.extract_images_from_docx(docx_path)
+        else:
+            title, title_lines = doc_processor.extract_title_from_docx(temp_file_path)
+            content_md = doc_processor.extract_text_from_docx(temp_file_path, skip_title_lines=title_lines)
+            images = doc_processor.extract_images_from_docx(temp_file_path)
+
+        # 上传图片到OSS并构建media_map
+        media_map = {}
+        oss_service = OSSService()
+        for idx, (img_filename, img_data) in enumerate(images, start=1):
+            try:
+                oss_url, oss_key = oss_service.upload_file(
+                    file_data=img_data,
+                    filename=img_filename,
+                    folder=f"drafts/{draft.id}"
+                )
+                placeholder = f"[[IMG_{idx}]]"
+                media_map[placeholder] = oss_url
+
+                image = SubmissionImage(
+                    submission_id=draft.submission_id,
+                    oss_url=oss_url,
+                    oss_key=oss_key,
+                    original_filename=img_filename,
+                    file_size=len(img_data) if img_data else None
+                )
+                db.add(image)
+            except Exception as e:
+                logger.error("Word图片上传失败 %s: %s", img_filename, e)
+
+        await db.commit()
+
+        # 将占位符替换为实际图片，得到可编辑HTML
+        content_html = ContentProcessor.render_for_wordpress(content_md, media_map)
+
+        return {
+            "title": title or "无标题",
+            "content_md": content_md,
+            "content_html": content_html,
+            "image_count": len(media_map),
+            "media_map": media_map
+        }
+    finally:
+        try:
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+        except Exception:
+            pass
+        try:
+            if docx_path and os.path.exists(docx_path) and docx_path != temp_file_path:
+                os.unlink(docx_path)
+        except Exception:
+            pass

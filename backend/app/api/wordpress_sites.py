@@ -24,6 +24,20 @@ class VerifyResult(BaseModel):
     valid: bool
     message: Optional[str] = None
 
+
+class SiteTestItem(BaseModel):
+    """单个站点测试结果"""
+    site_id: int
+    name: str
+    url: str
+    valid: bool
+    message: Optional[str] = None
+
+
+class TestAllResult(BaseModel):
+    """批量测试结果"""
+    results: List[SiteTestItem]
+
 router = APIRouter(prefix="/wordpress-sites", tags=["WordPress站点"])
 
 
@@ -96,6 +110,50 @@ async def update_wordpress_site(
         )
     
     return site
+
+
+@router.post("/test-all", response_model=TestAllResult)
+async def test_all_wordpress_connections(
+    active_only: bool = True,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    批量测试所有 WordPress 站点连接（A/B/C/D 等）
+    """
+    site_service = WordPressSiteService(db)
+    sites = await site_service.list_sites(active_only=active_only)
+    results: List[SiteTestItem] = []
+    for site in sites:
+        password = site_service.get_decrypted_password(site)
+        if not site.api_username or not password:
+            results.append(SiteTestItem(
+                site_id=site.id,
+                name=site.name,
+                url=site.url,
+                valid=False,
+                message="未配置用户名或应用程序密码"
+            ))
+            continue
+        wp_service = WordPressService(site, password)
+        try:
+            success, message = await wp_service.verify_connection()
+            results.append(SiteTestItem(
+                site_id=site.id,
+                name=site.name,
+                url=site.url,
+                valid=success,
+                message=message or ("连接成功" if success else "连接失败")
+            ))
+        except Exception as e:
+            results.append(SiteTestItem(
+                site_id=site.id,
+                name=site.name,
+                url=site.url,
+                valid=False,
+                message=str(e)
+            ))
+    return TestAllResult(results=results)
 
 
 @router.post("/{site_id}/test", response_model=VerifyResult)

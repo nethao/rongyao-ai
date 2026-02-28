@@ -19,6 +19,11 @@
       >
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="username" label="用户名" min-width="120" />
+        <el-table-column prop="display_name" label="显示名（认领标签）" min-width="100" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.display_name || '-' }}
+          </template>
+        </el-table-column>
         <el-table-column label="角色" width="100">
           <template #default="{ row }">
             <el-tag :type="row.role === 'admin' ? 'danger' : 'primary'" size="small">
@@ -105,9 +110,12 @@
       width="380px"
       :close-on-click-modal="false"
     >
-      <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="80px">
+      <el-form ref="editFormRef" :model="editForm" :rules="editRules" label-width="100px">
         <el-form-item label="用户名">
           <el-input v-model="editForm.username" disabled />
+        </el-form-item>
+        <el-form-item label="显示名（认领标签）">
+          <el-input v-model="editForm.display_name" placeholder="中文姓名，认领时显示；留空则用用户名" clearable />
         </el-form-item>
         <el-form-item label="角色" prop="role">
           <el-select v-model="editForm.role" placeholder="选择角色" style="width: 100%">
@@ -228,13 +236,18 @@ const submitAdd = async () => {
 const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
 const editFormRef = ref(null)
-const editForm = ref({ id: null, username: '', role: 'editor' })
+const editForm = ref({ id: null, username: '', display_name: '', role: 'editor' })
 const editRules = {
   role: [{ required: true, message: '请选择角色', trigger: 'change' }]
 }
 
 function openEditDialog(row) {
-  editForm.value = { id: row.id, username: row.username, role: row.role }
+  editForm.value = {
+    id: row.id,
+    username: row.username,
+    display_name: row.display_name || '',
+    role: row.role
+  }
   editDialogVisible.value = true
 }
 
@@ -244,7 +257,10 @@ const submitEdit = async () => {
     if (!valid) return
     editSubmitting.value = true
     try {
-      await updateUser(editForm.value.id, { role: editForm.value.role })
+      await updateUser(editForm.value.id, {
+        role: editForm.value.role,
+        display_name: editForm.value.display_name || null
+      })
       ElMessage.success('已保存')
       editDialogVisible.value = false
       loadUsers()

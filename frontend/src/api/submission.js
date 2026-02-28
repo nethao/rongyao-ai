@@ -67,6 +67,17 @@ export function createSubmission(data) {
 }
 
 /**
+ * 认领投稿
+ * @param {number} id - 投稿ID
+ */
+export function claimSubmission(id) {
+  return request({
+    url: `/submissions/${id}/claim`,
+    method: 'post'
+  })
+}
+
+/**
  * 触发AI转换任务
  * @param {number} id - 投稿ID
  */

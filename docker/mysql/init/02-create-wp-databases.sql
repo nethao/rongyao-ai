@@ -1,0 +1,8 @@
+-- 为 WordPress 四站点创建数据库（wp_a 由 MYSQL_DATABASE 已创建）
+CREATE DATABASE IF NOT EXISTS wp_b;
+CREATE DATABASE IF NOT EXISTS wp_c;
+CREATE DATABASE IF NOT EXISTS wp_d;
+GRANT ALL PRIVILEGES ON wp_b.* TO 'wordpress'@'%';
+GRANT ALL PRIVILEGES ON wp_c.* TO 'wordpress'@'%';
+GRANT ALL PRIVILEGES ON wp_d.* TO 'wordpress'@'%';
+FLUSH PRIVILEGES;

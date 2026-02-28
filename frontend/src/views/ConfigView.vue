@@ -7,50 +7,24 @@
     </el-page-header>
     
     <el-tabs v-model="activeTab" style="margin-top: 20px">
-      <!-- AI配置 -->
+      <!-- AI配置（阿里云百炼） -->
       <el-tab-pane label="AI配置" name="openai">
         <el-card>
-          <el-alert title="快速配置" type="info" :closable="false" style="margin-bottom: 20px">
-            <el-button size="small" @click="useAliyunPreset">阿里云百炼</el-button>
-            <el-button size="small" @click="useMinimaxPreset">MiniMax</el-button>
-            <el-button size="small" @click="useOpenRouterPreset">OpenRouter</el-button>
-            <el-button size="small" @click="useOpenAIPreset">OpenAI</el-button>
+          <el-alert title="阿里云百炼（通义千问）" type="info" :closable="false" style="margin-bottom: 20px">
+            登录 <a href="https://bailian.console.aliyun.com/" target="_blank">阿里云百炼控制台</a> 获取 API Key
           </el-alert>
           
           <el-form :model="openaiForm" label-width="150px">
             <el-form-item label="API Key">
               <el-input v-model="openaiForm.api_key" type="password" show-password placeholder="sk-..."></el-input>
             </el-form-item>
-            <el-form-item label="API端点">
-              <el-input v-model="openaiForm.base_url" placeholder="留空使用默认OpenAI端点"></el-input>
-              <div style="color: #909399; font-size: 12px; margin-top: 5px;">
-                完整URL，例如：https://dashscope.aliyuncs.com/compatible-mode/v1
-              </div>
-            </el-form-item>
             <el-form-item label="模型">
-              <el-select v-model="openaiForm.model" placeholder="选择模型" filterable allow-create>
-                <el-option-group label="阿里云百炼">
-                  <el-option label="通义千问-Turbo (推荐)" value="qwen-turbo"></el-option>
-                  <el-option label="通义千问-Plus" value="qwen-plus"></el-option>
-                  <el-option label="通义千问-Max" value="qwen-max"></el-option>
-                  <el-option label="通义千问-Long" value="qwen-long"></el-option>
-                </el-option-group>
-                <el-option-group label="OpenRouter">
-                  <el-option label="Llama 3.3 70B (免费)" value="meta-llama/llama-3.3-70b-instruct:free"></el-option>
-                  <el-option label="Gemini 2.0 Flash (免费)" value="google/gemini-2.0-flash-exp:free"></el-option>
-                  <el-option label="Mistral Small (免费)" value="mistralai/mistral-small-3.1:free"></el-option>
-                </el-option-group>
-                <el-option-group label="OpenAI">
-                  <el-option label="GPT-4" value="gpt-4"></el-option>
-                  <el-option label="GPT-3.5 Turbo" value="gpt-3.5-turbo"></el-option>
-                </el-option-group>
-                <el-option-group label="MiniMax">
-                  <el-option label="MiniMax-Text-01" value="MiniMax-Text-01"></el-option>
-                </el-option-group>
+              <el-select v-model="openaiForm.model" placeholder="选择模型">
+                <el-option label="通义千问-Plus（推荐）" value="qwen-plus"></el-option>
+                <el-option label="通义千问-Turbo（速度快）" value="qwen-turbo"></el-option>
+                <el-option label="通义千问-Max（效果最好）" value="qwen-max"></el-option>
+                <el-option label="通义千问-Long（长文本）" value="qwen-long"></el-option>
               </el-select>
-              <div style="color: #909399; font-size: 12px; margin-top: 5px;">
-                推荐：阿里云百炼通义千问-Turbo（性价比高）
-              </div>
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="saveOpenAI" :loading="saving">保存配置</el-button>
@@ -118,7 +92,10 @@
             <div>
               <el-tag type="success">共 {{ wpSites.length }} 个站点</el-tag>
             </div>
-            <el-button type="primary" @click="showAddSite = true" icon="Plus">添加站点</el-button>
+            <div>
+              <el-button type="info" @click="testAllConnections" :loading="testingAll" style="margin-right: 8px;">批量测试连接</el-button>
+              <el-button type="primary" @click="showAddSite = true" icon="Plus">添加站点</el-button>
+            </div>
           </div>
           <el-table :data="wpSites" v-loading="loadingSites" stripe border>
             <el-table-column prop="id" label="ID" width="60"></el-table-column>
@@ -137,6 +114,89 @@
                 <el-button type="primary" size="small" @click="testConnection(row)" :loading="testing === row.id">测试</el-button>
                 <el-button type="warning" size="small" @click="editSite(row)">编辑</el-button>
                 <el-button type="danger" size="small" @click="deleteSite(row.id)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- 采编映射：邮箱 -> 采编姓名（责编署名） -->
+      <el-tab-pane label="采编映射" name="editors">
+        <el-card>
+          <el-alert title="邮箱或邮箱前缀对应采编姓名，发布文章时自动署名「责编」" type="info" :closable="false" style="margin-bottom: 20px" />
+          <el-button type="primary" @click="showAddEditor = true" style="margin-bottom: 12px">添加映射</el-button>
+          <el-table :data="editorMappings" v-loading="loadingEditors" stripe border>
+            <el-table-column prop="email" label="邮箱/前缀" width="200" />
+            <el-table-column prop="display_name" label="采编姓名" width="120" />
+            <el-table-column label="操作" width="150">
+              <template #default="{ row }">
+                <el-button type="primary" link size="small" @click="editEditorMapping(row)">编辑</el-button>
+                <el-button type="danger" link size="small" @click="removeEditorMapping(row.id)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- 文编映射：用户在各站点下的署名 -->
+      <el-tab-pane label="文编映射" name="copyEditors">
+        <el-card>
+          <el-alert title="编辑人员在不同站点下的署名，发布时自动署名「文编」" type="info" :closable="false" style="margin-bottom: 20px" />
+          <el-button type="primary" @click="showAddCopyEditor = true" style="margin-bottom: 12px">添加映射</el-button>
+          <el-table :data="copyEditorMappings" v-loading="loadingCopyEditors" stripe border>
+            <el-table-column prop="user_id" label="用户ID" width="90" />
+            <el-table-column prop="site_name" label="站点" width="140" />
+            <el-table-column prop="display_name" label="文编署名" width="120" />
+            <el-table-column label="操作" width="150">
+              <template #default="{ row }">
+                <el-button type="primary" link size="small" @click="editCopyEditorMapping(row)">编辑</el-button>
+                <el-button type="danger" link size="small" @click="removeCopyEditorMapping(row.id)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- 媒体与站点映射 -->
+      <el-tab-pane label="媒体映射" name="media">
+        <el-card>
+          <el-alert title="配置媒体类型与WordPress站点的对应关系" type="info" :closable="false" style="margin-bottom: 20px">
+            邮件中解析的"媒体"类型将自动映射到对应的WordPress站点
+          </el-alert>
+          
+          <el-table :data="mediaMappings" v-loading="loadingMappings" stripe border>
+            <el-table-column label="媒体类型" width="150">
+              <template #default="{ row }">
+                <el-tag>{{ getMediaTypeName(row.media_type) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="对应站点" min-width="200">
+              <template #default="{ row }">
+                <el-select 
+                  v-model="row.site_id" 
+                  placeholder="选择站点"
+                  @change="updateMapping(row.media_type, row.site_id)"
+                  style="width: 100%"
+                >
+                  <el-option 
+                    v-for="site in wpSites.filter(s => s.active)" 
+                    :key="site.id" 
+                    :label="site.name" 
+                    :value="site.id"
+                  />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="100" align="center">
+              <template #default="{ row }">
+                <el-button 
+                  type="danger" 
+                  size="small" 
+                  @click="deleteMapping(row.media_type)"
+                  v-if="row.site_id"
+                >
+                  清除
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -187,6 +247,82 @@
         <el-button type="primary" @click="updateSite" :loading="saving">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 采编映射 添加/编辑 -->
+    <el-dialog v-model="showAddEditor" title="添加采编映射" width="420px" @open="loadEditorEmailOptions">
+      <el-form :model="editorForm" label-width="100px">
+        <el-form-item label="邮箱/前缀">
+          <el-select
+            v-model="editorForm.email"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择历史或输入新邮箱/前缀"
+            style="width: 100%"
+          >
+            <el-option v-for="opt in editorEmailOptions" :key="opt" :label="opt" :value="opt" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="采编姓名">
+          <el-input v-model="editorForm.display_name" placeholder="责编署名" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAddEditor = false">取消</el-button>
+        <el-button type="primary" @click="submitEditorMapping" :loading="saving">确定</el-button>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="showEditEditor" title="编辑采编映射" width="420px">
+      <el-form :model="editorForm" label-width="100px">
+        <el-form-item label="邮箱/前缀">
+          <el-input v-model="editorForm.email" disabled />
+        </el-form-item>
+        <el-form-item label="采编姓名">
+          <el-input v-model="editorForm.display_name" placeholder="责编署名" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showEditEditor = false">取消</el-button>
+        <el-button type="primary" @click="updateEditorMappingSubmit" :loading="saving">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 文编映射 添加 -->
+    <el-dialog v-model="showAddCopyEditor" title="添加文编映射" width="420px">
+      <el-form :model="copyEditorForm" label-width="100px">
+        <el-form-item label="用户">
+          <el-select v-model="copyEditorForm.user_id" placeholder="选择用户" style="width:100%" filterable>
+            <el-option v-for="u in usersList" :key="u.id" :label="u.username + (u.display_name ? ' (' + u.display_name + ')' : '')" :value="u.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="站点">
+          <el-select v-model="copyEditorForm.site_id" placeholder="选择站点" style="width:100%">
+            <el-option v-for="s in wpSites" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="文编署名">
+          <el-input v-model="copyEditorForm.display_name" placeholder="该站点下显示的名称" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAddCopyEditor = false">取消</el-button>
+        <el-button type="primary" @click="submitCopyEditorMapping" :loading="saving">确定</el-button>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="showEditCopyEditor" title="编辑文编映射" width="420px">
+      <el-form :model="copyEditorForm" label-width="100px">
+        <el-form-item label="站点">
+          <el-input :value="copyEditorForm.site_name" disabled />
+        </el-form-item>
+        <el-form-item label="文编署名">
+          <el-input v-model="copyEditorForm.display_name" placeholder="该站点下显示的名称" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showEditCopyEditor = false">取消</el-button>
+        <el-button type="primary" @click="updateCopyEditorMappingSubmit" :loading="saving">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -194,30 +330,62 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '../api/request'
+import { getMediaMappings, updateMediaMapping, deleteMediaMapping } from '../api/mediaMapping'
+import {
+  listEditorMappings,
+  getEditorEmailOptions,
+  createEditorMapping,
+  updateEditorMapping,
+  deleteEditorMapping,
+  listCopyEditorMappings,
+  createCopyEditorMapping,
+  updateCopyEditorMapping,
+  deleteCopyEditorMapping
+} from '../api/nameMappings'
+import { getUsers } from '../api/user'
 
 const activeTab = ref('openai')
 const saving = ref(false)
 const verifying = ref(false)
 const loadingSites = ref(false)
+const loadingMappings = ref(false)
 const testing = ref(0)
+const testingAll = ref(false)
 const showAddSite = ref(false)
 const showEditSite = ref(false)
-const showModelHelp = ref(false)
-
-const openaiForm = ref({ api_key: '', base_url: '', model: 'gpt-4' })
+const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+const openaiForm = ref({ api_key: '', model: 'qwen-plus' })
 const ossForm = ref({ access_key_id: '', access_key_secret: '', endpoint: '', bucket_name: '' })
 const imapForm = ref({ host: '', port: '993', user: '', password: '', use_ssl: true })
 const wpSites = ref([])
+const mediaMappings = ref([
+  { media_type: 'rongyao', site_id: null },
+  { media_type: 'shidai', site_id: null },
+  { media_type: 'zhengxian', site_id: null },
+  { media_type: 'zhengqi', site_id: null },
+  { media_type: 'toutiao', site_id: null }
+])
 const newSite = ref({ name: '', url: '', api_username: '', api_password: '' })
 const editingSite = ref({ id: 0, name: '', url: '', api_username: '', api_password: '' })
+const loadingEditors = ref(false)
+const loadingCopyEditors = ref(false)
+const editorMappings = ref([])
+const editorEmailOptions = ref([])
+const copyEditorMappings = ref([])
+const usersList = ref([])
+const showAddEditor = ref(false)
+const showEditEditor = ref(false)
+const editorForm = ref({ id: null, email: '', display_name: '' })
+const showAddCopyEditor = ref(false)
+const showEditCopyEditor = ref(false)
+const copyEditorForm = ref({ id: null, user_id: null, site_id: null, site_name: '', display_name: '' })
 
 const loadConfigs = async () => {
   try {
     const data = await request.get('/config/')
     const configs = data.configs || {}
     openaiForm.value.api_key = configs.OPENAI_API_KEY || ''
-    openaiForm.value.base_url = configs.OPENAI_BASE_URL || ''
-    openaiForm.value.model = configs.OPENAI_MODEL || 'gpt-4'
+    openaiForm.value.model = configs.OPENAI_MODEL || 'qwen-plus'
     ossForm.value.access_key_id = configs.OSS_ACCESS_KEY_ID || ''
     ossForm.value.endpoint = configs.OSS_ENDPOINT || ''
     ossForm.value.bucket_name = configs.OSS_BUCKET_NAME || ''
@@ -248,9 +416,7 @@ const saveOpenAI = async () => {
   saving.value = true
   try {
     await request.put('/config/', { key: 'OPENAI_API_KEY', value: openaiForm.value.api_key, encrypted: true })
-    if (openaiForm.value.base_url) {
-      await request.put('/config/', { key: 'OPENAI_BASE_URL', value: openaiForm.value.base_url, encrypted: false })
-    }
+    await request.put('/config/', { key: 'OPENAI_BASE_URL', value: DASHSCOPE_BASE_URL, encrypted: false })
     await request.put('/config/', { key: 'OPENAI_MODEL', value: openaiForm.value.model, encrypted: false })
     ElMessage.success('保存成功')
   } catch (error) {
@@ -327,31 +493,6 @@ const verifyIMAP = async () => {
   }
 }
 
-// 预设配置
-const useAliyunPreset = () => {
-  openaiForm.value.base_url = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-  openaiForm.value.model = 'qwen-turbo'
-  ElMessage.success('已应用阿里云百炼预设配置（推荐）')
-}
-
-const useMinimaxPreset = () => {
-  openaiForm.value.base_url = 'https://api.minimaxi.com/v1'
-  openaiForm.value.model = 'MiniMax-Text-01'
-  ElMessage.success('已应用MiniMax预设配置')
-}
-
-const useOpenRouterPreset = () => {
-  openaiForm.value.base_url = 'https://openrouter.ai/api/v1'
-  openaiForm.value.model = 'meta-llama/llama-3.3-70b-instruct:free'
-  ElMessage.success('已应用OpenRouter预设配置（免费）')
-}
-
-const useOpenAIPreset = () => {
-  openaiForm.value.base_url = ''
-  openaiForm.value.model = 'gpt-4'
-  ElMessage.success('已应用OpenAI官方预设配置')
-}
-
 const addSite = async () => {
   saving.value = true
   try {
@@ -416,6 +557,26 @@ const testConnection = async (site) => {
   }
 }
 
+const testAllConnections = async () => {
+  testingAll.value = true
+  try {
+    const data = await request.post('/wordpress-sites/test-all?active_only=true')
+    const results = data.results || []
+    const ok = results.filter(r => r.valid).length
+    const fail = results.filter(r => !r.valid).length
+    if (fail === 0) {
+      ElMessage.success(`全部 ${ok} 个站点连接成功`)
+    } else {
+      const details = results.map(r => `${r.name}: ${r.valid ? '成功' : r.message || '失败'}`).join('；')
+      ElMessage.warning(`${ok} 成功，${fail} 失败。${details}`)
+    }
+  } catch (error) {
+    ElMessage.error('批量测试失败')
+  } finally {
+    testingAll.value = false
+  }
+}
+
 const deleteSite = async (id) => {
   try {
     await request.delete(`/wordpress-sites/${id}`)
@@ -426,9 +587,212 @@ const deleteSite = async (id) => {
   }
 }
 
+// 媒体映射相关方法
+const getMediaTypeName = (type) => {
+  const names = {
+    'rongyao': '荣耀网',
+    'shidai': '时代网',
+    'zhengxian': '争先网',
+    'zhengqi': '政企网',
+    'toutiao': '今日头条'
+  }
+  return names[type] || type
+}
+
+const loadEditorMappings = async () => {
+  loadingEditors.value = true
+  try {
+    editorMappings.value = await listEditorMappings()
+  } catch (e) {
+    ElMessage.error('加载采编映射失败')
+  } finally {
+    loadingEditors.value = false
+  }
+}
+
+const loadEditorEmailOptions = async () => {
+  try {
+    editorEmailOptions.value = await getEditorEmailOptions()
+  } catch (e) {
+    editorEmailOptions.value = []
+  }
+}
+
+const loadCopyEditorMappings = async () => {
+  loadingCopyEditors.value = true
+  try {
+    copyEditorMappings.value = await listCopyEditorMappings()
+  } catch (e) {
+    ElMessage.error('加载文编映射失败')
+  } finally {
+    loadingCopyEditors.value = false
+  }
+}
+
+const submitEditorMapping = async () => {
+  if (!editorForm.value.email?.trim() || !editorForm.value.display_name?.trim()) {
+    ElMessage.warning('请填写邮箱和采编姓名')
+    return
+  }
+  saving.value = true
+  try {
+    await createEditorMapping({ email: editorForm.value.email.trim(), display_name: editorForm.value.display_name.trim() })
+    ElMessage.success('添加成功')
+    showAddEditor.value = false
+    editorForm.value = { id: null, email: '', display_name: '' }
+    loadEditorMappings()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '添加失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+const editEditorMapping = (row) => {
+  editorForm.value = { id: row.id, email: row.email, display_name: row.display_name }
+  showEditEditor.value = true
+}
+
+const updateEditorMappingSubmit = async () => {
+  if (!editorForm.value.display_name?.trim()) {
+    ElMessage.warning('请填写采编姓名')
+    return
+  }
+  saving.value = true
+  try {
+    await updateEditorMapping(editorForm.value.id, { display_name: editorForm.value.display_name.trim() })
+    ElMessage.success('保存成功')
+    showEditEditor.value = false
+    loadEditorMappings()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+const removeEditorMapping = async (id) => {
+  try {
+    await deleteEditorMapping(id)
+    ElMessage.success('已删除')
+    loadEditorMappings()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '删除失败')
+  }
+}
+
+const submitCopyEditorMapping = async () => {
+  if (!copyEditorForm.value.user_id || !copyEditorForm.value.site_id || !copyEditorForm.value.display_name?.trim()) {
+    ElMessage.warning('请选择用户、站点并填写文编署名')
+    return
+  }
+  saving.value = true
+  try {
+    await createCopyEditorMapping({
+      user_id: copyEditorForm.value.user_id,
+      site_id: copyEditorForm.value.site_id,
+      display_name: copyEditorForm.value.display_name.trim()
+    })
+    ElMessage.success('添加成功')
+    showAddCopyEditor.value = false
+    copyEditorForm.value = { id: null, user_id: null, site_id: null, site_name: '', display_name: '' }
+    loadCopyEditorMappings()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '添加失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+const editCopyEditorMapping = (row) => {
+  copyEditorForm.value = { id: row.id, user_id: row.user_id, site_id: row.site_id, site_name: row.site_name || '', display_name: row.display_name }
+  showEditCopyEditor.value = true
+}
+
+const updateCopyEditorMappingSubmit = async () => {
+  if (!copyEditorForm.value.display_name?.trim()) {
+    ElMessage.warning('请填写文编署名')
+    return
+  }
+  saving.value = true
+  try {
+    await updateCopyEditorMapping(copyEditorForm.value.id, { display_name: copyEditorForm.value.display_name.trim() })
+    ElMessage.success('保存成功')
+    showEditCopyEditor.value = false
+    loadCopyEditorMappings()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+const removeCopyEditorMapping = async (id) => {
+  try {
+    await deleteCopyEditorMapping(id)
+    ElMessage.success('已删除')
+    loadCopyEditorMappings()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '删除失败')
+  }
+}
+
+const loadMediaMappings = async () => {
+  loadingMappings.value = true
+  try {
+    const data = await getMediaMappings()
+    // 合并数据库中的映射到默认列表
+    mediaMappings.value.forEach(m => {
+      const found = data.find(d => d.media_type === m.media_type)
+      if (found) {
+        m.site_id = found.site_id
+      }
+    })
+  } catch (error) {
+    ElMessage.error('加载媒体映射失败')
+  } finally {
+    loadingMappings.value = false
+  }
+}
+
+const updateMapping = async (mediaType, siteId) => {
+  try {
+    await updateMediaMapping(mediaType, siteId)
+    ElMessage.success('映射已更新')
+  } catch (error) {
+    ElMessage.error('更新失败')
+  }
+}
+
+const deleteMapping = async (mediaType) => {
+  try {
+    await deleteMediaMapping(mediaType)
+    const mapping = mediaMappings.value.find(m => m.media_type === mediaType)
+    if (mapping) {
+      mapping.site_id = null
+    }
+    ElMessage.success('映射已清除')
+  } catch (error) {
+    ElMessage.error('清除失败')
+  }
+}
+
+const loadUsers = async () => {
+  try {
+    const res = await getUsers({ page: 1, size: 500 })
+    usersList.value = res.items || []
+  } catch (e) {
+    console.error('加载用户列表失败', e)
+  }
+}
+
 onMounted(() => {
   loadConfigs()
   loadWPSites()
+  loadMediaMappings()
+  loadEditorMappings()
+  loadCopyEditorMappings()
+  loadUsers()
 })
 </script>
 

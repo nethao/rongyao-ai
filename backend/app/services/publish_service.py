@@ -95,7 +95,8 @@ class PublishService:
         draft_id: int,
         site_id: int,
         status: str = "publish",
-        system_username: Optional[str] = None
+        system_username: Optional[str] = None,
+        publisher_user_id: Optional[int] = None,
     ) -> tuple[bool, Optional[int], Optional[str], Optional[str]]:
         """
         发布草稿到WordPress站点
@@ -176,7 +177,16 @@ class PublishService:
             content_html = self.markdown_to_html(content_with_images)
         # 统一为 <video> 添加 controls，避免发布到 WP 后缺少播放控制条
         content_html = ContentProcessor._ensure_video_controls(content_html)
-        
+
+        # 自动署名：责编（采编）、文编
+        from app.services.byline_service import BylineService
+        byline_svc = BylineService(self.db)
+        editor_name = await byline_svc.get_editor_display_name(submission.email_from)
+        copy_editor_name = None
+        if publisher_user_id and site_id:
+            copy_editor_name = await byline_svc.get_copy_editor_display_name(publisher_user_id, site_id)
+        content_html = BylineService.append_bylines(content_html, editor_name, copy_editor_name)
+
         success, post_id, error_msg = await wp_service.create_post(
             title=title,
             content=content_html,

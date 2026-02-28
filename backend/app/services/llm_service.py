@@ -1,22 +1,14 @@
 """
 LLM API客户端服务
-用于与OpenAI API通信，实现AI语义转换功能
+通过阿里云百炼（DashScope）OpenAI 兼容接口调用通义千问，实现AI语义转换功能。
 
-错误处理策略:
-- RateLimitError: 速率限制错误，使用指数退避重试最多3次
-- APIConnectionError: 网络连接错误，使用指数退避重试最多3次
-- APIError: API错误（如无效请求），不重试，直接抛出
-- AuthenticationError: 认证错误（如无效API密钥），不重试，直接抛出
-- Timeout: 超时错误，使用指数退避重试最多3次
-- 其他OpenAIError: 记录错误并抛出
-
-重试配置:
-- 最大重试次数: 3次
-- 等待策略: 指数退避，初始2秒，最大10秒
-- 重试条件: RateLimitError, APIConnectionError, Timeout
+重试策略:
+- RateLimitError / APIConnectionError / Timeout: 指数退避重试最多3次
+- AuthenticationError / BadRequestError: 不重试，直接抛出
 """
 import asyncio
 import logging
+import re
 from typing import Optional
 from openai import (
     AsyncOpenAI,
@@ -68,34 +60,15 @@ class LLMService:
         model: Optional[str] = None,
         base_url: Optional[str] = None
     ):
-        """
-        初始化LLM服务
-        
-        Args:
-            api_key: OpenAI API密钥，如果为None则从配置读取
-            model: 使用的模型名称，如果为None则从配置读取
-            base_url: 自定义API端点，支持OpenRouter等中转API
-        
-        Raises:
-            LLMConfigurationError: 如果API密钥未配置
-        """
         self.api_key = api_key or settings.OPENAI_API_KEY
         self.model = model or settings.OPENAI_MODEL
-        self.base_url = base_url
+        self.base_url = base_url or settings.OPENAI_BASE_URL
         
         if not self.api_key:
-            error_msg = "OpenAI API key is not configured"
-            logger.error(error_msg)
-            raise LLMConfigurationError(error_msg)
+            raise LLMConfigurationError("百炼 API Key 未配置")
         
-        # 创建客户端，支持自定义base_url
-        client_kwargs = {"api_key": self.api_key}
-        if self.base_url:
-            client_kwargs["base_url"] = self.base_url
-            logger.info(f"Using custom API endpoint: {self.base_url}")
-        
-        self.client = AsyncOpenAI(**client_kwargs)
-        logger.info(f"LLM Service initialized with model: {self.model}")
+        self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+        logger.info(f"LLM Service initialized: model={self.model}, endpoint={self.base_url}")
     
     @classmethod
     async def from_config_service(
@@ -124,13 +97,10 @@ class LLMService:
         model_name = await config_service.get_config("OPENAI_MODEL")
         
         if not api_key:
-            # 如果数据库中没有配置，尝试从环境变量获取
             api_key = settings.OPENAI_API_KEY
         
         if not api_key:
-            error_msg = "OpenAI API key is not configured in database or environment"
-            logger.error(error_msg)
-            raise LLMConfigurationError(error_msg)
+            raise LLMConfigurationError("百炼 API Key 未配置（数据库和环境变量均为空）")
         
         logger.info(f"LLM Service created from ConfigService: base_url={base_url}, model={model_name or model}")
         return cls(api_key=api_key, base_url=base_url, model=model_name or model)
@@ -178,16 +148,50 @@ class LLMService:
         # 检查转换后内容长度是否合理
         original_len = len(original.strip())
         transformed_len = len(transformed.strip())
+
+        def _strip_media(text: str) -> str:
+            if not text:
+                return ""
+            # markdown 图片语法
+            text = re.sub(r'!\[[^\]]*\]\([^\)]+\)', ' ', text)
+            # 图片占位符
+            text = re.sub(r'\[\[IMG_\d+\]\]', ' ', text)
+            # video 占位符
+            text = re.sub(r'\[\[VIDEO_BLOCK_\d+\]\]', ' ', text)
+            # img/video 标签
+            text = re.sub(r'<img\b[^>]*>', ' ', text, flags=re.IGNORECASE)
+            text = re.sub(r'<video\b[^>]*>.*?</video>', ' ', text, flags=re.IGNORECASE | re.DOTALL)
+            # 去掉其余HTML标签，保留文本
+            text = re.sub(r'<[^>]+>', ' ', text)
+            return text
         
-        # 计算原文中的图片标记数量
+        # 计算原文中的图片/视频标记数量
         img_markers_count = original.count('![图片')
-        
-        # 如果原文包含大量图片标记，放宽长度限制
-        if img_markers_count > 10:
-            # 有大量图片时，只检查纯文本部分
-            # 估算纯文本长度（假设每个图片标记约100字符）
-            estimated_text_len = original_len - (img_markers_count * 100)
-            min_length = max(100, int(estimated_text_len * 0.3))  # 至少30%的文本
+        img_placeholders_count = len(re.findall(r'\[\[IMG_\d+\]\]', original))
+        img_tags_count = len(re.findall(r'<img\b', original, re.IGNORECASE))
+        video_tags_count = len(re.findall(r'<video\b', original, re.IGNORECASE))
+        media_markers_count = (
+            img_markers_count + img_placeholders_count + img_tags_count + video_tags_count
+        )
+
+        # 如果原文包含图片/视频，使用“纯文本长度”做校验，避免因媒体占位符过多导致误判
+        if media_markers_count >= 1:
+            original_text_len = len(_strip_media(original).strip())
+            transformed_text_len = len(_strip_media(transformed).strip())
+            if original_text_len < 300:
+                min_length = max(50, int(original_text_len * 0.3))
+            else:
+                min_length = max(100, int(original_text_len * 0.5))
+            if transformed_text_len < min_length:
+                logger.warning(
+                    f"Transformed content is too short (text-only): {transformed_text_len} chars "
+                    f"(original text: {original_text_len} chars, min expected: {min_length}, "
+                    f"media_markers: {media_markers_count})"
+                )
+                raise LLMTransformError(
+                    f"Transformed content is too short ({transformed_len} chars), "
+                    f"expected at least {min_length} chars"
+                )
         else:
             # 正常情况：允许±50%的长度变化
             min_length = int(original_len * 0.5)
@@ -198,7 +202,7 @@ class LLMService:
             logger.warning(
                 f"Transformed content is too short: {transformed_len} chars "
                 f"(original: {original_len} chars, min expected: {min_length}, "
-                f"img_markers: {img_markers_count})"
+                f"media_markers: {media_markers_count})"
             )
             raise LLMTransformError(
                 f"Transformed content is too short ({transformed_len} chars), "
@@ -367,30 +371,29 @@ class LLMService:
             logger.warning(f"API timeout error, will retry: {e}")
             raise
         except AuthenticationError as e:
-            error_msg = f"Authentication failed - invalid API key: {e}"
+            error_msg = f"百炼认证失败（API Key 无效）: {e}"
             logger.error(error_msg)
             raise LLMTransformError(error_msg) from e
         except BadRequestError as e:
-            error_msg = f"Bad request - invalid parameters: {e}"
+            error_msg = f"请求参数错误: {e}"
             logger.error(error_msg)
             raise LLMTransformError(error_msg) from e
         except InternalServerError as e:
-            error_msg = f"OpenAI server error: {e}"
+            error_msg = f"百炼服务端错误: {e}"
             logger.error(error_msg)
             raise LLMTransformError(error_msg) from e
         except APIError as e:
-            error_msg = f"OpenAI API error: {e}"
+            error_msg = f"百炼 API 错误: {e}"
             logger.error(error_msg)
             raise LLMTransformError(error_msg) from e
         except LLMTransformError:
-            # 重新抛出我们自己的验证错误
             raise
         except OpenAIError as e:
-            error_msg = f"OpenAI error: {e}"
+            error_msg = f"百炼调用异常: {e}"
             logger.error(error_msg)
             raise LLMTransformError(error_msg) from e
         except Exception as e:
-            error_msg = f"Unexpected error during LLM transformation: {e}"
+            error_msg = f"LLM 转换异常: {e}"
             logger.error(error_msg, exc_info=True)
             raise LLMTransformError(error_msg) from e
     
@@ -435,45 +438,28 @@ class LLMService:
             True表示连接正常，False表示连接失败
         """
         try:
-            logger.info(f"Verifying LLM API connection with model: {self.model}")
+            logger.info(f"验证百炼 API 连接: model={self.model}")
             
-            # 发送一个简单的测试请求
             response = await self.client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {"role": "user", "content": "Hello"}
-                ],
+                messages=[{"role": "user", "content": "Hello"}],
                 max_tokens=10,
-                timeout=10.0  # 10秒超时
+                timeout=10.0,
             )
             
             if response.choices and response.choices[0].message.content:
-                logger.info("LLM API connection verified successfully")
+                logger.info("百炼 API 连接验证成功")
                 return True
             
-            logger.warning("LLM API returned empty response during verification")
+            logger.warning("百炼 API 返回空响应")
             return False
             
-        except AuthenticationError as e:
-            logger.error(f"LLM API authentication failed - invalid API key: {e}")
-            return False
-        except RateLimitError as e:
-            logger.error(f"LLM API rate limit exceeded during verification: {e}")
-            return False
-        except APIConnectionError as e:
-            logger.error(f"LLM API connection error during verification: {e}")
-            return False
-        except APITimeoutError as e:
-            logger.error(f"LLM API timeout during verification: {e}")
-            return False
-        except BadRequestError as e:
-            logger.error(f"LLM API bad request during verification (invalid model?): {e}")
-            return False
-        except OpenAIError as e:
-            logger.error(f"LLM API error during verification: {e}")
+        except (AuthenticationError, RateLimitError, APIConnectionError,
+                APITimeoutError, BadRequestError, OpenAIError) as e:
+            logger.error(f"百炼 API 验证失败: {e}")
             return False
         except Exception as e:
-            logger.error(f"Unexpected error during LLM API verification: {e}", exc_info=True)
+            logger.error(f"百炼 API 验证异常: {e}", exc_info=True)
             return False
     
     async def close(self):

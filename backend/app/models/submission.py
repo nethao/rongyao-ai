@@ -28,13 +28,17 @@ class Submission(Base):
     source_unit = Column(String(255))  # 来稿单位
     target_site_id = Column(Integer)  # 目标WordPress站点ID
     content_source = Column(String(20))  # 'weixin', 'meipian', 'doc', 'docx', 'text'
+    claimed_by_user_id = Column(Integer, ForeignKey("users.id"))  # 认领人ID
+    claimed_at = Column(DateTime(timezone=True))  # 认领时间
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # 关系
     images = relationship("SubmissionImage", back_populates="submission", cascade="all, delete-orphan")
+    attachments = relationship("SubmissionAttachment", back_populates="submission", cascade="all, delete-orphan")
     drafts = relationship("Draft", back_populates="submission", cascade="all, delete-orphan")
+    claimed_by_user = relationship("User", backref="claimed_submissions", foreign_keys=[claimed_by_user_id])
 
     def __repr__(self):
         return f"<Submission(id={self.id}, status='{self.status}')>"
