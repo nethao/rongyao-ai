@@ -83,6 +83,7 @@ class SubmissionListResponse(BaseModel):
     total: int
     page: int
     size: int
+    daily_totals: Optional[dict] = None  # 按「投稿日期」(14:00 规则) 的当天总数，key 为 YYYY-MM-DD
 
 
 class ContentPreviewResponse(BaseModel):

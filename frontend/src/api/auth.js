@@ -45,6 +45,16 @@ export function getCurrentUser() {
 }
 
 /**
+ * 编辑人员首次完善状态（是否需强制完成改密/显示名/文编署名）
+ */
+export function getProfileCompleteStatus() {
+  return request({
+    url: '/auth/profile-complete-status',
+    method: 'get'
+  })
+}
+
+/**
  * 修改密码
  */
 export function changePassword(data) {

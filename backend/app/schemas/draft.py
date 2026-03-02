@@ -51,6 +51,8 @@ class DraftDetailSchema(DraftSchema):
     """草稿详情模型（包含原文）"""
     media_map: Optional[Dict[str, Any]] = None  # 占位符→URL 映射，前端编辑/保存用
     original_content: Optional[str] = ""  # 来自关联的 submission，兼容空值
+    email_raw_content: Optional[str] = None  # 邮件原文（用于左侧提示）
+    source_url: Optional[str] = None  # 邮件提取的来源链接
     original_html: Optional[str] = None  # 公众号原始 HTML，用于还原排版
     email_subject: Optional[str] = None  # 文章标题
     content_source: Optional[str] = None  # 内容来源：weixin/meipian/word等

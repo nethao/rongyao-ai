@@ -50,8 +50,29 @@ def fetch_emails_task():
             )
         
         try:
-            # 初始化服务
-            fetcher = IMAPFetcher()
+            # 从数据库读取 IMAP 配置
+            async with AsyncSessionLocal() as db:
+                from app.services.config_service import ConfigService
+                cs = ConfigService(db)
+                imap_host = await cs.get_config("IMAP_HOST")
+                imap_port = await cs.get_config("IMAP_PORT")
+                imap_user = await cs.get_config("IMAP_USER")
+                imap_password = await cs.get_config("IMAP_PASSWORD", decrypt=True)
+                imap_use_ssl = await cs.get_config("IMAP_USE_SSL")
+                imap_timeout = await cs.get_config("IMAP_TIMEOUT_SECONDS")
+            
+            # 初始化服务（使用数据库配置）
+            port_int = int(imap_port) if imap_port else 993
+            timeout_int = int(imap_timeout) if imap_timeout else 20
+            use_ssl_bool = str(imap_use_ssl).strip().lower() not in {"false", "0", "no", "off"}
+            
+            fetcher = IMAPFetcher(
+                host=imap_host,
+                port=port_int,
+                username=imap_user,
+                password=imap_password,
+                use_ssl=use_ssl_bool
+            )
             doc_processor = DocumentProcessor()
             oss_service = OSSService()
             
@@ -125,11 +146,24 @@ async def process_email(email_data, doc_processor, oss_service):
     """
     from app.services.email_parser import EmailParser, ContentType
     from app.services.web_fetcher import WebFetcher
+    from app.services.config_service import ConfigService
     import sys
     _tf = sys.modules["tempfile"]
 
     async with AsyncSessionLocal() as db:
         submission_service = SubmissionService(db)
+        config_service = ConfigService(db)
+        wechat302_api_key = await config_service.get_config("WECHAT302_API_KEY", decrypt=True)
+        wechat302_enabled = await config_service.get_config("WECHAT302_ENABLED")
+        wechat302_base_url = await config_service.get_config("WECHAT302_BASE_URL")
+        weixin_cookie = await config_service.get_config("WEIXIN_COOKIE", decrypt=True)
+        weixin_proxy_url = await config_service.get_config("WEIXIN_PROXY_URL", decrypt=True)
+        use_wechat302 = str(wechat302_enabled or "true").strip().lower() not in {"false", "0", "no", "off"}
+        
+        # 跳过撤回邮件
+        if "发信方已撤回邮件" in email_data.subject or "已撤回" in email_data.subject:
+            logger.info(f"跳过撤回邮件: {email_data.subject}")
+            return
         
         # 解析邮件标题
         cooperation, media_type, source_unit, title = EmailParser.parse_subject(email_data.subject)
@@ -221,15 +255,23 @@ async def process_email(email_data, doc_processor, oss_service):
             image_urls = []
             original_html = None  # 保存原始HTML
             attachment_records = []  # 待写入的附件记录（OSS已上传）
+            source_url = None
             
             # 根据内容类型处理
             if content_type == ContentType.WEIXIN:
                 # 抓取公众号文章
                 url = EmailParser.extract_url(email_data.body, ContentType.WEIXIN)
                 if url:
+                    source_url = url
                     logger.info(f"抓取公众号文章: {url}")
-                    fetcher = WebFetcher()
-                    fetched_title, fetched_content, fetched_html, image_urls = fetcher.fetch_weixin_article(url)
+                    fetcher = WebFetcher(
+                        wechat302_api_key=wechat302_api_key,
+                        wechat302_enabled=use_wechat302,
+                        wechat302_base_url=wechat302_base_url or "https://api.302.ai",
+                        weixin_cookie=weixin_cookie or "",
+                        weixin_proxy_url=weixin_proxy_url or "",
+                    )
+                    fetched_title, fetched_content, fetched_html, image_urls = await fetcher.fetch_weixin_article_async(url)
                     
                     if fetched_content:
                         content = fetched_content
@@ -243,13 +285,35 @@ async def process_email(email_data, doc_processor, oss_service):
                             img_data = fetcher.download_image(img_url)
                             if img_data:
                                 images_to_upload.append((f"weixin_image_{idx}.jpg", img_data))
+                    else:
+                        # 抓取失败，提供打开链接的按钮
+                        logger.warning(f"微信文章抓取失败，提供链接: {url}")
+                        content = f"【微信文章抓取失败，请点击下方按钮打开】\n\n文章链接：{url}"
+                        original_html = f'''
+                        <div style="text-align: center; padding: 60px 20px; background: #f8f9fa; border-radius: 8px;">
+                            <div style="font-size: 48px; margin-bottom: 20px;">📱</div>
+                            <h3 style="color: #333; margin-bottom: 15px;">微信文章抓取失败</h3>
+                            <p style="color: #666; margin-bottom: 30px;">由于微信反爬限制，无法自动抓取内容<br>请点击下方按钮在新窗口打开文章，然后复制内容</p>
+                            <a href="{url}" target="_blank" style="display: inline-block; padding: 15px 40px; background: #07c160; color: white; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: bold;">
+                                🔗 打开微信文章
+                            </a>
+                            <p style="margin-top: 20px; font-size: 12px; color: #999;">提示：打开后请手动复制文章内容到编辑器</p>
+                        </div>
+                        '''
             
             elif content_type == ContentType.MEIPIAN:
                 # 抓取美篇文章
                 url = EmailParser.extract_url(email_data.body, ContentType.MEIPIAN)
                 if url:
+                    source_url = url
                     logger.info(f"抓取美篇文章: {url}")
-                    fetcher = WebFetcher()
+                    fetcher = WebFetcher(
+                        wechat302_api_key=wechat302_api_key,
+                        wechat302_enabled=use_wechat302,
+                        wechat302_base_url=wechat302_base_url or "https://api.302.ai",
+                        weixin_cookie=weixin_cookie or "",
+                        weixin_proxy_url=weixin_proxy_url or "",
+                    )
                     fetched_title, fetched_content, image_urls, fetched_html = fetcher.fetch_meipian_article(url)
                     
                     if fetched_content:
@@ -349,6 +413,7 @@ async def process_email(email_data, doc_processor, oss_service):
             elif content_type == ContentType.OTHER_URL:
                 # 人工采集模式：只保存链接和邮件原文，不自动抓取网页内容
                 url = EmailParser.extract_url(email_data.body, ContentType.OTHER_URL)
+                source_url = url
                 url_line = f"链接: {url}" if url else ""
                 body_text = (email_data.body or "").strip()
                 content = "\n\n".join(filter(None, [url_line, body_text])) or url_line or ""
@@ -730,11 +795,38 @@ async def process_email(email_data, doc_processor, oss_service):
             else:
                 content_source = 'text'
             
-            # 创建投稿记录（使用解析后的标题，保存原始HTML）
+            # 自动创建采编映射（如果发件人包含名称）
+            if '<' in email_data.from_addr and '>' in email_data.from_addr:
+                # 格式: "姓名 <email@example.com>"
+                import re
+                match = re.match(r'(.+?)\s*<(.+?)>', email_data.from_addr)
+                if match:
+                    editor_name = match.group(1).strip()
+                    email_addr = match.group(2).strip()
+                    
+                    # 清理乱码：只保留中文、字母、数字、空格
+                    editor_name = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\s]', '', editor_name).strip()
+                    
+                    if editor_name:  # 确保清理后不为空
+                        # 检查是否已有映射
+                        from app.models.editor_name_mapping import EditorNameMapping
+                        existing = await db.execute(
+                            select(EditorNameMapping).where(EditorNameMapping.email == email_addr).limit(1)
+                        )
+                        if not existing.scalar_one_or_none():
+                            # 创建新映射
+                            mapping = EditorNameMapping(email=email_addr, display_name=editor_name)
+                            db.add(mapping)
+                            await db.commit()
+                            logger.info(f"自动创建采编映射: {email_addr} -> {editor_name}")
+            
+            # 创建投稿记录（保存原始邮件主题用于去重，解析后的标题另存）
             submission = await submission_service.create_submission(
-                email_subject=title or email_data.subject,
+                email_subject=email_data.subject,  # 保存原始邮件主题
                 email_from=email_data.from_addr,
                 email_date=email_data.date,
+                email_raw_content=email_data.body,
+                source_url=source_url,
                 original_content=content,
                 doc_file_path=doc_path,
                 docx_file_path=docx_path
@@ -920,12 +1012,28 @@ async def process_email(email_data, doc_processor, oss_service):
             else:
                 draft_content = content
 
-            # Word/压缩包/OTHER_URL（有图时）：显式构建 media_map，避免占位符与图片错位或丢失
-            if content_type in [ContentType.WORD, ContentType.ARCHIVE, ContentType.OTHER_URL] and oss_urls_ordered:
+            # 有图时统一显式构建 media_map，避免占位符与图片错位或丢失
+            if oss_urls_ordered:
+                import re
                 draft_media_map = {
                     f"[[IMG_{idx}]]": oss_url
                     for idx, oss_url in enumerate(oss_urls_ordered, start=1)
                 }
+
+                # 先把 Markdown 图片语法替换为占位符
+                for idx in range(1, len(oss_urls_ordered) + 1):
+                    draft_content = re.sub(
+                        rf'!\[图片{idx}\]\([^)]+\)',
+                        f'[[IMG_{idx}]]',
+                        draft_content or ""
+                    )
+
+                # 对公众号/美篇：若正文中未保留占位符，则补到文末，保证编辑器可见
+                if content_type in [ContentType.WEIXIN, ContentType.MEIPIAN] and '[[IMG_' not in (draft_content or ''):
+                    appended = "\n\n".join(f"[[IMG_{idx}]]" for idx in range(1, len(oss_urls_ordered) + 1))
+                    draft_content = f"{(draft_content or '').strip()}\n\n{appended}".strip()
+                    logger.info(f"{content_type} 草稿未检测到占位符，已追加 {len(oss_urls_ordered)} 个到文末")
+
                 draft = await draft_service.create_draft(
                     submission_id=submission.id,
                     original_content_md=draft_content,

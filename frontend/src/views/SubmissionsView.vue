@@ -117,7 +117,7 @@
         >
           <el-option label="待处理" value="pending" />
           <el-option label="处理中" value="processing" />
-          <el-option label="已完成" value="completed" />
+          <el-option label="未发布" value="completed" />
           <el-option label="失败" value="failed" />
         </el-select>
       </div>
@@ -165,10 +165,15 @@
         <el-table-column prop="id" label="ID" width="70">
           <template #default="{ row }">
             <span v-if="row.isDateRow" style="font-size: 14px; color: #303133;">
-              {{ row.dateDisplay }} - 共 {{ row.count }} 篇稿件
+              {{ row.dateDisplay }} - 当天共 {{ row.count }} 篇稿件
               <span class="date-row-tip">今日已统计结束</span>
             </span>
             <span v-else>{{ row.id }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="email_date" label="投稿时间" width="160" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.isDateRow ? '-' : formatDate(row.email_date) }}
           </template>
         </el-table-column>
         <el-table-column prop="email_from" label="采编" min-width="220" show-overflow-tooltip>
@@ -250,17 +255,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="email_date" label="邮件时间" width="160" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ formatDate(row.email_date) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="160">
-          <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="320" fixed="right">
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <div class="op-cell">
             <el-button
@@ -275,7 +270,7 @@
               <el-icon class="claimed-icon"><User /></el-icon>
               {{ row.claimed_by_label }}
             </span>
-            <!-- 有草稿：查看草稿 -->
+            <!-- 有草稿：文编审核 -->
             <el-button
               v-if="row.drafts && row.drafts.length > 0"
               type="primary"
@@ -283,10 +278,7 @@
               @click.stop="handleViewDraft(row)"
               :disabled="!row.can_edit"
             >
-              查看草稿
-            </el-button>
-            <el-button type="info" size="small" @click.stop="handleViewDetail(row)">
-              详情
+              文编审核
             </el-button>
             <el-button
               type="danger"
@@ -581,41 +573,41 @@ const formatSubmissionDate = (dateStr) => {
   }
 }
 
-// 将投稿列表按日期分组，并插入日期行
+// 将投稿列表按日期分组，并插入日期行；日期行展示当天总数（优先用接口 daily_totals）
 const submissionsWithDateRows = computed(() => {
   if (!submissions.value || submissions.value.length === 0) return []
-  
+  const totals = dailyTotals.value || {}
+
   const grouped = {}
-  
+
   // 按日期分组
   submissions.value.forEach(sub => {
     const dateKey = getSubmissionDate(sub.created_at)
     if (!dateKey) return
-    
+
     if (!grouped[dateKey]) {
       grouped[dateKey] = []
     }
     grouped[dateKey].push(sub)
   })
-  
+
   // 按日期排序（最新的在前）
   const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
-  
+
   // 构建带日期行的列表
   const result = []
   sortedDates.forEach(dateKey => {
-    // 插入日期分隔行
+    const dayTotal = totals[dateKey] !== undefined ? totals[dateKey] : grouped[dateKey].length
     result.push({
       isDateRow: true,
       dateKey,
       dateDisplay: formatSubmissionDate(dateKey),
-      count: grouped[dateKey].length,
+      count: dayTotal,
       id: `date-${dateKey}` // 用于row-key
     })
-    // 插入该日期的所有投稿
     result.push(...grouped[dateKey])
   })
-  
+
   return result
 })
 
@@ -636,7 +628,7 @@ const getRowClassName = ({ row }) => {
 const spanMethod = ({ row, columnIndex }) => {
   if (row.isDateRow) {
     if (columnIndex === 1) { // 从第二列（ID列）开始合并
-      return [1, 11] // 合并剩余11列（含邮件时间）
+      return [1, 10] // 合并剩余10列（投稿时间～操作）
     } else if (columnIndex === 0) {
       return [1, 1] // 选择框列保持原样
     }
@@ -660,6 +652,7 @@ const needsManualEdit = (row) => {
 const loading = ref(false)
 const submissions = ref([])
 const total = ref(0)
+const dailyTotals = ref({})  // 按投稿日期(14:00规则)的当天总数，来自接口 daily_totals
 const currentPage = ref(1)
 const pageSize = ref(20)
 const searchKeyword = ref('')
@@ -1049,7 +1042,8 @@ const loadSubmissions = async () => {
     const response = await getSubmissions(params)
     submissions.value = response.items
     total.value = response.total
-    
+    dailyTotals.value = response.daily_totals || {}
+
     // 提取筛选选项
     extractFilterOptions(response.items)
   } catch (error) {
@@ -1310,7 +1304,7 @@ const getStatusText = (status) => {
   const textMap = {
     pending: '待处理',
     processing: '处理中',
-    completed: '已完成',
+    completed: '未发布',
     failed: '失败'
   }
   return textMap[status] || status

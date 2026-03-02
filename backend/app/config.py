@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     IMAP_USER: Optional[str] = None
     IMAP_PASSWORD: Optional[str] = None
     IMAP_USE_SSL: bool = True
+    IMAP_TIMEOUT_SECONDS: int = 20
     
     # Celery配置
     CELERY_BROKER_URL: str = "redis://redis:6379/0"

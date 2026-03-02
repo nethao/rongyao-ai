@@ -76,7 +76,21 @@ async def verify_oss_config(
     )
 
 
+@router.post("/verify/wechat302", response_model=ConfigVerifyResult)
+async def verify_wechat302_config(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    验证 302 微信抓取配置（管理员）
+    """
+    service = ConfigService(db)
+    valid, message = await service.verify_wechat302_config()
+    return ConfigVerifyResult(valid=valid, message=message)
+
+
 @router.post("/verify/imap", response_model=ConfigVerifyResult)
+@router.post("/verify/imap/", response_model=ConfigVerifyResult)
 async def verify_imap_config(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -85,8 +99,47 @@ async def verify_imap_config(
     验证IMAP配置（管理员）
     """
     service = ConfigService(db)
-    valid = await service.verify_imap_config()
-    return ConfigVerifyResult(
-        valid=valid,
-        message="IMAP配置有效" if valid else "IMAP配置无效或缺失"
+    valid, message = await service.verify_imap_config()
+    return ConfigVerifyResult(valid=valid, message=message)
+
+
+@router.get("/auto-fetch-interval", response_model=dict)
+async def get_auto_fetch_interval(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    获取自动抓取邮件间隔（分钟）
+    """
+    service = ConfigService(db)
+    interval = await service.get_config("AUTO_FETCH_INTERVAL_MINUTES")
+    return {"interval": int(interval) if interval else 0}
+
+
+@router.put("/auto-fetch-interval", response_model=dict)
+async def update_auto_fetch_interval(
+    interval: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """
+    设置自动抓取邮件间隔（分钟，0 表示禁用）
+    """
+    if interval < 0:
+        return {"error": "间隔不能为负数"}
+    
+    service = ConfigService(db)
+    await service.set_config(
+        key="AUTO_FETCH_INTERVAL_MINUTES",
+        value=str(interval),
+        description="自动抓取邮件间隔（分钟，0表示禁用）"
     )
+    
+    # 重新加载 Celery Beat 配置
+    from app.tasks import reload_beat_schedule
+    reload_beat_schedule()
+    
+    return {
+        "message": f"已设置自动抓取间隔为 {interval} 分钟" if interval > 0 else "已禁用自动抓取",
+        "interval": interval
+    }

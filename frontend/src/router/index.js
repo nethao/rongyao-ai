@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { isAuthenticated, isAdmin } from '../utils/auth'
+import { isAuthenticated, isAdmin, getUserInfo } from '../utils/auth'
+import { getProfileCompleteStatus } from '../api/auth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -9,6 +10,12 @@ const router = createRouter({
       name: 'login',
       component: () => import('../views/LoginView.vue'),
       meta: { requiresAuth: false }
+    },
+    {
+      path: '/profile-complete',
+      name: 'profile-complete',
+      component: () => import('../views/ProfileCompleteView.vue'),
+      meta: { requiresAuth: true }
     },
     {
       path: '/',
@@ -91,7 +98,7 @@ const router = createRouter({
 })
 
 // 路由守卫
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const authenticated = isAuthenticated()
   const admin = isAdmin()
 
@@ -101,19 +108,39 @@ router.beforeEach((to, from, next) => {
     return
   }
 
+  // 已登录用户访问登录页，重定向到首页
+  if (to.name === 'login' && authenticated) {
+    next({ name: 'submissions' })
+    return
+  }
+
+  // 编辑人员首次登录强制完善：未完成则只能访问 profile-complete
+  if (authenticated && to.name !== 'profile-complete' && to.meta.requiresAuth) {
+    const user = getUserInfo()
+    if (user?.role !== 'editor') {
+      // 非编辑无需首次完善检查
+      // 继续后续权限判断
+    } else {
+      try {
+        const res = await getProfileCompleteStatus()
+        if (res && res.complete === false) {
+          next({ name: 'profile-complete' })
+          return
+        }
+      } catch (_) {
+        // 编辑用户检查失败时不放行，避免首次登录绕过
+        next({ name: 'profile-complete' })
+        return
+      }
+    }
+  }
+
   // 需要管理员权限的路由
   if (to.meta.requiresAdmin && !admin) {
     next({ path: '/submissions' })
     return
   }
 
-  // 已登录用户访问登录页，重定向到首页
-  if (to.name === 'login' && authenticated) {
-    next({ name: 'home' })
-    return
-  }
-
-  // 编辑人员首次可引导至个人中心完善文编映射（可选：若需要强制首次填写，可在此判断并 next({ name: 'profile', query: { first: '1' } })）
   next()
 })
 

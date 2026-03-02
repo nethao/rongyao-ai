@@ -24,6 +24,8 @@ class SubmissionService:
         email_subject: str,
         email_from: str,
         email_date,
+        email_raw_content: Optional[str],
+        source_url: Optional[str],
         original_content: str,
         doc_file_path: Optional[str] = None,
         docx_file_path: Optional[str] = None
@@ -46,6 +48,8 @@ class SubmissionService:
             email_subject=email_subject,
             email_from=email_from,
             email_date=email_date,
+            email_raw_content=email_raw_content,
+            source_url=source_url,
             original_content=original_content,
             doc_file_path=doc_file_path,
             docx_file_path=docx_file_path,

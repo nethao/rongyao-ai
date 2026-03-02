@@ -2,6 +2,7 @@
 IMAP邮件抓取服务
 """
 import re
+import socket
 from typing import List, Optional, Tuple
 from datetime import datetime
 from imap_tools import MailBox, AND
@@ -10,6 +11,24 @@ from app.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
+
+# QQ IMAP DNS 解析问题 workaround：强制使用可用 IP
+_IMAP_HOST_OVERRIDE = {
+    'imap.qq.com': '183.47.101.192',
+}
+
+_original_getaddrinfo = socket.getaddrinfo
+
+def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    """修复 QQ IMAP DNS 解析到不可用 IP 的问题"""
+    if host in _IMAP_HOST_OVERRIDE:
+        override_ip = _IMAP_HOST_OVERRIDE[host]
+        logger.debug(f"DNS override: {host} -> {override_ip}")
+        # 返回 IPv4 地址
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (override_ip, port))]
+    return _original_getaddrinfo(host, port, family, type, proto, flags)
+
+socket.getaddrinfo = _patched_getaddrinfo
 
 
 class EmailData:
@@ -46,7 +65,8 @@ class EmailData:
             self.source = match.group(2).strip()
             logger.info(f"解析邮件标题: 站点={self.target_site}, 来源={self.source}")
         else:
-            logger.warning(f"无法解析邮件标题格式: {self.subject}")
+            # 该字段仅用于旧格式兼容，当前主解析逻辑在 EmailParser 中完成，避免无意义告警刷屏
+            logger.debug(f"邮件标题不匹配旧格式（可忽略）: {self.subject}")
 
 
 class IMAPFetcher:
@@ -75,6 +95,7 @@ class IMAPFetcher:
         self.username = username or settings.IMAP_USER
         self.password = password or settings.IMAP_PASSWORD
         self.use_ssl = use_ssl if use_ssl is not None else settings.IMAP_USE_SSL
+        self.timeout = getattr(settings, "IMAP_TIMEOUT_SECONDS", 20)
         
         if not all([self.host, self.username, self.password]):
             raise ValueError("IMAP配置不完整，请检查环境变量")
@@ -87,7 +108,12 @@ class IMAPFetcher:
             MailBox: 邮箱连接对象
         """
         try:
-            mailbox = MailBox(self.host, self.port)
+            # IMAP_USE_SSL=false 时使用非加密类，避免将网络/协议错误误判为认证错误
+            if self.use_ssl:
+                mailbox = MailBox(self.host, self.port, timeout=self.timeout)
+            else:
+                from imap_tools import MailBoxUnencrypted
+                mailbox = MailBoxUnencrypted(self.host, self.port, timeout=self.timeout)
             mailbox.login(self.username, self.password, initial_folder='INBOX')
             logger.info(f"成功连接到IMAP服务器: {self.host}")
             return mailbox
@@ -164,8 +190,15 @@ class IMAPFetcher:
         # 解码主题
         subject = self._decode_header(msg.subject)
         
-        # 获取发件人
+        # 获取发件人（包含名称和邮箱）
         from_addr = msg.from_
+        # 尝试从原始头部提取发件人名称
+        from_header = msg.headers.get('from', [''])[0] if hasattr(msg, 'headers') and msg.headers else ''
+        if from_header and '<' in from_header:
+            # 格式: "姓名 <email@example.com>" 或 "=?charset?B?encoded?= <email>"
+            # 解码 MIME 编码的名称
+            from_header = self._decode_header(from_header)
+            from_addr = from_header.strip()
         
         # 获取日期
         date = msg.date

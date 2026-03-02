@@ -92,11 +92,12 @@ class AuthService:
         if existing_user:
             raise ValueError(f"用户名 '{username}' 已存在")
         
-        # 创建用户
+        # 创建用户（编辑人员首次登录须完善信息，管理员不强制）
         user = User(
             username=username,
             password_hash=get_password_hash(password),
-            role=role
+            role=role,
+            must_change_password=(role == "editor"),
         )
         
         self.db.add(user)
@@ -125,6 +126,7 @@ class AuthService:
             return False
         
         user.password_hash = get_password_hash(new_password)
+        user.must_change_password = False
         await self.db.commit()
         
         return True

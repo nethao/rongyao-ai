@@ -1,10 +1,11 @@
 """
 投稿管理API端点
 """
-from datetime import datetime, time
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, File, UploadFile, Form
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, text
 from typing import Optional
 import tempfile
 import os
@@ -23,13 +24,30 @@ from sqlalchemy import desc
 router = APIRouter(prefix="/submissions", tags=["submissions"])
 logger = logging.getLogger(__name__)
 
+# 与前端一致的「投稿日期」规则：当日 14:01 至次日 14:00 归为次日
+TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _submission_date_key(created_at: datetime) -> str | None:
+    """根据 created_at 计算投稿日期 key (YYYY-MM-DD)。当日 14:01 至次日 14:00 归为次日。"""
+    if created_at is None:
+        return None
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    dt = created_at.astimezone(TZ)
+    local_date = dt.date()
+    if dt.hour > 14 or (dt.hour == 14 and dt.minute >= 1):
+        local_date = local_date + timedelta(days=1)
+    return local_date.isoformat()
+
 
 @router.post("/preview", response_model=ContentPreviewResponse)
 async def preview_content(
     article_type: str = Form(..., description="文章类型: weixin, meipian, word"),
     article_url: Optional[str] = Form(None, description="文章链接（公众号/美篇）"),
     word_file: Optional[UploadFile] = File(None, description="Word文档文件"),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     预览/解析内容（在预览阶段上传图片到OSS）
@@ -48,6 +66,28 @@ async def preview_content(
         content_source = ""
         image_count = 0
         media_map = {}
+        fetcher = None
+
+        async def _get_fetcher():
+            nonlocal fetcher
+            if fetcher is not None:
+                return fetcher
+            from app.services.config_service import ConfigService
+            cs = ConfigService(db)
+            wechat302_api_key = await cs.get_config("WECHAT302_API_KEY", decrypt=True)
+            wechat302_enabled = await cs.get_config("WECHAT302_ENABLED")
+            wechat302_base = await cs.get_config("WECHAT302_BASE_URL")
+            weixin_cookie = await cs.get_config("WEIXIN_COOKIE", decrypt=True)
+            weixin_proxy_url = await cs.get_config("WEIXIN_PROXY_URL", decrypt=True)
+            use_wechat302 = str(wechat302_enabled or "true").strip().lower() not in {"false", "0", "no", "off"}
+            fetcher = WebFetcher(
+                wechat302_api_key=wechat302_api_key,
+                wechat302_enabled=use_wechat302,
+                wechat302_base_url=wechat302_base or "https://api.302.ai",
+                weixin_cookie=weixin_cookie or "",
+                weixin_proxy_url=weixin_proxy_url or "",
+            )
+            return fetcher
         
         oss_service = OSSService()
         
@@ -56,8 +96,8 @@ async def preview_content(
             if not article_url:
                 raise HTTPException(status_code=400, detail="公众号类型需要提供文章链接")
             
-            fetcher = WebFetcher()
-            fetched_title, fetched_content, fetched_html, image_urls = fetcher.fetch_weixin_article(article_url)
+            fetcher = await _get_fetcher()
+            fetched_title, fetched_content, fetched_html, image_urls = await fetcher.fetch_weixin_article_async(article_url)
             
             if not fetched_content:
                 raise HTTPException(status_code=400, detail="无法从链接获取文章内容，请检查链接是否正确")
@@ -98,7 +138,7 @@ async def preview_content(
             if not article_url:
                 raise HTTPException(status_code=400, detail="美篇类型需要提供文章链接")
             
-            fetcher = WebFetcher()
+            fetcher = await _get_fetcher()
             fetched_title, fetched_content, image_urls, fetched_html = await fetcher.fetch_meipian_article_async(article_url)
             
             if not fetched_content:
@@ -208,7 +248,7 @@ async def preview_content(
             if not article_url:
                 raise HTTPException(status_code=400, detail="其他链接类型需要提供文章链接")
 
-            fetcher = WebFetcher()
+            fetcher = await _get_fetcher()
             fetched_title, fetched_content, image_urls, fetched_html = await fetcher.fetch_generic_url_async(article_url)
 
             if not fetched_content:
@@ -294,6 +334,8 @@ async def create_submission(
             email_subject=body.title,
             email_from=body.email_from or current_user.username,
             email_date=datetime.utcnow(),
+            email_raw_content=body.content,
+            source_url=None,
             original_content=body.content
         )
         
@@ -452,6 +494,72 @@ async def list_submissions(
         logger.exception("list_submissions count failed: %s", e)
         raise HTTPException(status_code=500, detail=f"统计总数失败: {str(e)}")
 
+    # 按「投稿日期」(14:00 规则) 在库内聚合当天总数，供前端日期行展示
+    daily_totals = {}
+    try:
+        date_limit_start = datetime.now(TZ).date() - timedelta(days=90)
+        date_limit_end = datetime.now(TZ).date() + timedelta(days=1)
+        range_start = datetime.combine(date_limit_start, time.min).replace(tzinfo=TZ)
+        range_end = datetime.combine(date_limit_end, time.max).replace(tzinfo=TZ)
+        # 可选筛选（NULL 表示不筛）
+        search_pattern = f"%{search}%" if search else None
+        sd_ts = None
+        ed_ts = None
+        if start_date:
+            try:
+                sd_ts = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except ValueError:
+                pass
+        if end_date:
+            try:
+                ed_ts = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc)
+            except ValueError:
+                pass
+        # 在 PostgreSQL 内按 14:00 规则算 date_key 并聚合，避免 Python 逐行
+        # 使用 CAST 显式标注参数类型，避免 asyncpg 无法推断 NULL 参数类型
+        sql = text("""
+            WITH f AS (
+                SELECT s.created_at
+                FROM submissions s
+                WHERE s.id NOT IN (SELECT superseded_submission_id FROM duplicate_logs WHERE superseded_submission_id IS NOT NULL)
+                  AND s.created_at >= :range_start AND s.created_at <= :range_end
+                  AND (CAST(:status AS TEXT) IS NULL OR s.status = :status)
+                  AND (CAST(:editor AS TEXT) IS NULL OR s.email_from LIKE :editor)
+                  AND (CAST(:cooperation AS TEXT) IS NULL OR s.cooperation_type = :cooperation)
+                  AND (CAST(:media AS TEXT) IS NULL OR s.media_type = :media)
+                  AND (CAST(:unit AS TEXT) IS NULL OR s.source_unit = :unit)
+                  AND (CAST(:sd AS TIMESTAMPTZ) IS NULL OR s.created_at >= :sd)
+                  AND (CAST(:ed AS TIMESTAMPTZ) IS NULL OR s.created_at <= :ed)
+                  AND (CAST(:search AS TEXT) IS NULL OR s.email_subject ILIKE :search OR s.email_from ILIKE :search OR s.original_content ILIKE :search)
+            ),
+            with_key AS (
+                SELECT (
+                    (f.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai')::date
+                    + (CASE WHEN ((f.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Shanghai')::time >= '14:01') THEN 1 ELSE 0 END) * interval '1 day'
+                )::date AS date_key
+                FROM f
+            )
+            SELECT date_key::text AS date_key, count(*)::int AS cnt FROM with_key GROUP BY date_key
+        """)
+        params = {
+            "range_start": range_start,
+            "range_end": range_end,
+            "status": status,
+            "editor": f"{editor}%" if editor else None,
+            "cooperation": cooperation,
+            "media": media,
+            "unit": unit,
+            "sd": sd_ts,
+            "ed": ed_ts,
+            "search": search_pattern,
+        }
+        result = await db.execute(sql, params)
+        for row in result.all():
+            daily_totals[str(row[0])] = int(row[1])
+    except Exception as e:
+        logger.warning("list_submissions daily_totals failed: %s", e)
+        await db.rollback()  # 避免事务被 abort 影响后续主查询
+
     # 分页查询（带 images、drafts）
     query = (
         base.order_by(Submission.created_at.desc())
@@ -491,6 +599,7 @@ async def list_submissions(
             total=total,
             page=page,
             size=size,
+            daily_totals=daily_totals or None,
         )
     except Exception as e:
         logger.exception("list_submissions serialize failed: %s", e)

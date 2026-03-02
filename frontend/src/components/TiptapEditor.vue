@@ -339,7 +339,13 @@ const setHTML = (html) => {
   editor.value?.commands.setContent(html || '<p></p>', false)
 }
 
-defineExpose({ getHTML, setHTML, editor })
+/** 在光标处插入图片（供附件插入、拖拽等使用） */
+const insertImageAtCursor = (url) => {
+  if (!url || !editor.value) return
+  editor.value.chain().focus().setImage({ src: url }).run()
+}
+
+defineExpose({ getHTML, setHTML, editor, insertImageAtCursor })
 </script>
 
 <style scoped>

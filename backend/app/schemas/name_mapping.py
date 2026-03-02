@@ -45,3 +45,8 @@ class CopyEditorSiteMappingCreate(BaseModel):
 
 class CopyEditorSiteMappingUpdate(BaseModel):
     display_name: str
+
+
+class MyProfileUpdate(BaseModel):
+    """当前用户更新自己的显示名（编辑首次完善用）"""
+    display_name: Optional[str] = None

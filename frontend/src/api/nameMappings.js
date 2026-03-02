@@ -45,6 +45,10 @@ export function getMyProfile() {
   return request({ url: '/name-mappings/my/profile', method: 'get' })
 }
 
+export function updateMyProfile(data) {
+  return request({ url: '/name-mappings/my/profile', method: 'patch', data })
+}
+
 export function changeMyPassword(data) {
   return request({ url: '/name-mappings/my/change-password', method: 'post', data })
 }

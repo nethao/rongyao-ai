@@ -43,12 +43,20 @@
               class="captcha-input"
               @keyup.enter="handleLogin"
             />
-            <img
-              class="captcha-image"
-              :src="captchaImage"
-              alt="验证码"
+            <div
+              v-if="captchaImage"
+              class="captcha-image captcha-image-img"
               @click="refreshCaptcha"
-            />
+            >
+              <img :src="captchaImage" alt="验证码" />
+            </div>
+            <div
+              v-else
+              class="captcha-image captcha-image-placeholder"
+              @click="refreshCaptcha"
+            >
+              点击获取
+            </div>
           </div>
         </el-form-item>
         
@@ -78,10 +86,10 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { login as loginApi, getCaptcha } from '../api/auth'
+import { login as loginApi, getCaptcha, getProfileCompleteStatus } from '../api/auth'
 import { setToken, setUserInfo } from '../utils/auth'
 
 const router = useRouter()
@@ -114,12 +122,17 @@ const loginRules = {
 const refreshCaptcha = async () => {
   try {
     const res = await getCaptcha()
-    captchaImage.value = res.captcha_image
-    loginForm.captcha_id = res.captcha_id
+    captchaImage.value = res.captcha_image || ''
+    loginForm.captcha_id = res.captcha_id || ''
   } catch (error) {
     console.error('获取验证码失败:', error)
+    ElMessage.error('验证码加载失败，请点击重试')
   }
 }
+
+onMounted(() => {
+  refreshCaptcha()
+})
 
 const handleLogin = async () => {
   if (!loginFormRef.value) return
@@ -145,6 +158,25 @@ const handleLogin = async () => {
 
       ElMessage.success('登录成功')
 
+      // 编辑人员首次登录未完善则强制进入完善页
+      if (response.user?.role === 'editor') {
+        // 字段缺失时按未完善处理，避免首次登录放行
+        if (response.user?.must_change_password !== false) {
+          router.replace('/profile-complete')
+          return
+        }
+        try {
+          const status = await getProfileCompleteStatus()
+          if (status && status.complete === false) {
+            router.replace('/profile-complete')
+            return
+          }
+        } catch (_) {
+          router.replace('/profile-complete')
+          return
+        }
+      }
+
       // 跳转到目标页面或首页
       const redirect = route.query.redirect || '/'
       router.push(redirect)
@@ -158,8 +190,6 @@ const handleLogin = async () => {
     }
   })
 }
-
-refreshCaptcha()
 </script>
 
 <style scoped>
@@ -210,10 +240,26 @@ refreshCaptcha()
 .captcha-image {
   width: 140px;
   height: 48px;
+  min-width: 140px;
   border: 1px solid #e4e7ed;
   border-radius: 4px;
   cursor: pointer;
-  background: #fff;
+  background: #f5f7fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #909399;
+}
+.captcha-image-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.captcha-image-placeholder:hover {
+  color: #606266;
+  background: #ebeef5;
 }
 
 :deep(.el-card__header) {

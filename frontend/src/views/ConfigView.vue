@@ -61,7 +61,7 @@
       <!-- 邮箱配置 -->
       <el-tab-pane label="邮箱配置" name="imap">
         <el-card>
-          <el-form :model="imapForm" label-width="120px">
+          <el-form :model="imapForm" label-width="150px">
             <el-form-item label="IMAP服务器">
               <el-input v-model="imapForm.host" placeholder="imap.example.com"></el-input>
             </el-form-item>
@@ -77,9 +77,67 @@
             <el-form-item label="使用SSL">
               <el-switch v-model="imapForm.use_ssl"></el-switch>
             </el-form-item>
+            <el-form-item label="自动抓取间隔">
+              <el-input-number 
+                v-model="imapForm.auto_fetch_interval" 
+                :min="0" 
+                :max="1440"
+                placeholder="分钟"
+                style="width: 200px"
+              ></el-input-number>
+              <span style="margin-left: 10px; color: #909399;">分钟（0 表示禁用自动抓取）</span>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="saveIMAP" :loading="saving">保存配置</el-button>
               <el-button @click="verifyIMAP" :loading="verifying">验证配置</el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- 微信抓取（302） -->
+      <el-tab-pane label="微信抓取" name="wechat302">
+        <el-card>
+          <el-alert title="优先使用 302.AI 微信接口抓取公众号文章" type="info" :closable="false" style="margin-bottom: 20px" />
+          <el-form :model="wechat302Form" label-width="150px">
+            <el-form-item label="启用302抓取">
+              <el-switch v-model="wechat302Form.enabled"></el-switch>
+            </el-form-item>
+            <el-form-item label="302接口地址">
+              <el-input v-model="wechat302Form.base_url" placeholder="https://api.302.ai"></el-input>
+            </el-form-item>
+            <el-form-item label="302 API Key">
+              <el-input v-model="wechat302Form.api_key" type="password" show-password placeholder="Bearer Token（必填）"></el-input>
+              <div style="margin-top: 6px; color: #909399; font-size: 12px;">
+                该字段将加密保存；留空表示不修改现有密钥。
+              </div>
+            </el-form-item>
+            <el-divider content-position="left">微信公众号风控配置</el-divider>
+            <el-form-item label="微信会话Cookie">
+              <el-input
+                v-model="wechat302Form.weixin_cookie"
+                type="textarea"
+                :rows="4"
+                placeholder="从已登录微信文章页面复制完整 Cookie（可选，建议配置）"
+              />
+              <div style="margin-top: 6px; color: #909399; font-size: 12px;">
+                将加密保存。用于提高公众号文章抓取成功率。
+              </div>
+              <div style="margin-top: 8px; color: #606266; font-size: 12px; line-height: 1.7;">
+                获取方法：1) 在电脑浏览器登录微信文章页面并保持可正常阅读；2) 打开开发者工具(F12)；
+                3) 在 Network 里刷新页面并点开任意 mp.weixin.qq.com 请求；4) 复制 Request Headers 中完整 Cookie；
+                5) 粘贴到此处保存。建议每 3-7 天更新一次，失效后会再次触发风控页。
+              </div>
+            </el-form-item>
+            <el-form-item label="抓取代理URL">
+              <el-input v-model="wechat302Form.weixin_proxy_url" placeholder="http://user:pass@host:port（可选）" />
+              <div style="margin-top: 6px; color: #909399; font-size: 12px;">
+                将加密保存。建议使用住宅/高质量代理出口。
+              </div>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="saveWechat302" :loading="saving">保存配置</el-button>
+              <el-button @click="verifyWechat302" :loading="verifying">验证配置</el-button>
             </el-form-item>
           </el-form>
         </el-card>
@@ -356,7 +414,14 @@ const showEditSite = ref(false)
 const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 const openaiForm = ref({ api_key: '', model: 'qwen-plus' })
 const ossForm = ref({ access_key_id: '', access_key_secret: '', endpoint: '', bucket_name: '' })
-const imapForm = ref({ host: '', port: '993', user: '', password: '', use_ssl: true })
+const imapForm = ref({ host: '', port: '993', user: '', password: '', use_ssl: true, auto_fetch_interval: 0 })
+const wechat302Form = ref({
+  enabled: true,
+  base_url: 'https://api.302.ai',
+  api_key: '',
+  weixin_cookie: '',
+  weixin_proxy_url: ''
+})
 const wpSites = ref([])
 const mediaMappings = ref([
   { media_type: 'rongyao', site_id: null },
@@ -393,6 +458,19 @@ const loadConfigs = async () => {
     imapForm.value.port = configs.IMAP_PORT || '993'
     imapForm.value.user = configs.IMAP_USER || ''
     imapForm.value.use_ssl = configs.IMAP_USE_SSL !== 'false'
+    wechat302Form.value.enabled = configs.WECHAT302_ENABLED !== 'false'
+    wechat302Form.value.base_url = configs.WECHAT302_BASE_URL || 'https://api.302.ai'
+    wechat302Form.value.api_key = ''
+    wechat302Form.value.weixin_cookie = ''
+    wechat302Form.value.weixin_proxy_url = ''
+    
+    // 加载自动抓取间隔
+    try {
+      const intervalData = await request.get('/config/auto-fetch-interval')
+      imapForm.value.auto_fetch_interval = intervalData.interval || 0
+    } catch (error) {
+      console.error('加载自动抓取间隔失败:', error)
+    }
   } catch (error) {
     console.error('加载配置失败:', error)
     ElMessage.error('加载配置失败')
@@ -429,10 +507,11 @@ const saveOpenAI = async () => {
 const verifyOpenAI = async () => {
   verifying.value = true
   try {
-    const data = await request.post('/config/verify/llm')
+    const data = await request.post('/config/verify/llm', {}, { timeout: 30000 })
     ElMessage[data.valid ? 'success' : 'error'](data.message)
   } catch (error) {
-    ElMessage.error('验证失败')
+    const msg = error.response?.data?.message || error.message || '验证失败'
+    ElMessage.error(msg)
   } finally {
     verifying.value = false
   }
@@ -456,10 +535,11 @@ const saveOSS = async () => {
 const verifyOSS = async () => {
   verifying.value = true
   try {
-    const data = await request.post('/config/verify/oss')
+    const data = await request.post('/config/verify/oss', {}, { timeout: 30000 })
     ElMessage[data.valid ? 'success' : 'error'](data.message)
   } catch (error) {
-    ElMessage.error('验证失败')
+    const msg = error.response?.data?.message || error.message || '验证失败'
+    ElMessage.error(msg)
   } finally {
     verifying.value = false
   }
@@ -473,6 +553,12 @@ const saveIMAP = async () => {
     await request.put('/config/', { key: 'IMAP_USER', value: imapForm.value.user, encrypted: false })
     await request.put('/config/', { key: 'IMAP_PASSWORD', value: imapForm.value.password, encrypted: true })
     await request.put('/config/', { key: 'IMAP_USE_SSL', value: imapForm.value.use_ssl.toString(), encrypted: false })
+    
+    // 保存自动抓取间隔
+    await request.put('/config/auto-fetch-interval', imapForm.value.auto_fetch_interval, {
+      headers: { 'Content-Type': 'application/json' }
+    })
+    
     ElMessage.success('保存成功')
   } catch (error) {
     ElMessage.error('保存失败')
@@ -484,10 +570,50 @@ const saveIMAP = async () => {
 const verifyIMAP = async () => {
   verifying.value = true
   try {
-    const data = await request.post('/config/verify/imap')
+    // IMAP 连接可能较慢，单独设置 60 秒超时
+    const data = await request.post('/config/verify/imap', {}, { timeout: 60000 })
     ElMessage[data.valid ? 'success' : 'error'](data.message)
   } catch (error) {
-    ElMessage.error('验证失败')
+    const msg = error.response?.data?.message || error.message || '验证失败'
+    ElMessage.error(msg)
+  } finally {
+    verifying.value = false
+  }
+}
+
+const saveWechat302 = async () => {
+  saving.value = true
+  try {
+    await request.put('/config/', { key: 'WECHAT302_ENABLED', value: wechat302Form.value.enabled.toString(), encrypted: false })
+    await request.put('/config/', { key: 'WECHAT302_BASE_URL', value: wechat302Form.value.base_url || 'https://api.302.ai', encrypted: false })
+    if (wechat302Form.value.api_key && wechat302Form.value.api_key.trim()) {
+      await request.put('/config/', { key: 'WECHAT302_API_KEY', value: wechat302Form.value.api_key.trim(), encrypted: true })
+    }
+    if (wechat302Form.value.weixin_cookie && wechat302Form.value.weixin_cookie.trim()) {
+      await request.put('/config/', { key: 'WEIXIN_COOKIE', value: wechat302Form.value.weixin_cookie.trim(), encrypted: true })
+    }
+    if (wechat302Form.value.weixin_proxy_url && wechat302Form.value.weixin_proxy_url.trim()) {
+      await request.put('/config/', { key: 'WEIXIN_PROXY_URL', value: wechat302Form.value.weixin_proxy_url.trim(), encrypted: true })
+    }
+    ElMessage.success('保存成功')
+    wechat302Form.value.api_key = ''
+    wechat302Form.value.weixin_cookie = ''
+    wechat302Form.value.weixin_proxy_url = ''
+  } catch (error) {
+    ElMessage.error('保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+const verifyWechat302 = async () => {
+  verifying.value = true
+  try {
+    const data = await request.post('/config/verify/wechat302', {}, { timeout: 30000 })
+    ElMessage[data.valid ? 'success' : 'error'](data.message || (data.valid ? '验证成功' : '验证失败'))
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || '验证失败'
+    ElMessage.error(msg)
   } finally {
     verifying.value = false
   }

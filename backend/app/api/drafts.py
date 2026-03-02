@@ -81,6 +81,12 @@ async def get_draft(
             draft.submission.original_content,
             media_map
         )
+
+    # 邮件原文优先取 submissions.email_raw_content；若缺失则回退 source_url
+    email_raw_content = (draft.submission.email_raw_content or "").strip()
+    source_url = (draft.submission.source_url or "").strip() or None
+    if not email_raw_content and source_url:
+        email_raw_content = source_url
     
     # 构建响应（避免 None 导致 Pydantic 校验失败）
     # 若历史数据未写入 target_site_id，则根据 media_type 现查映射补齐
@@ -131,6 +137,8 @@ async def get_draft(
         "created_at": draft.created_at,
         "updated_at": draft.updated_at,
         "original_content": original_content_display if original_content_display is not None else "",
+        "email_raw_content": email_raw_content or None,
+        "source_url": source_url,
         "original_html": draft.submission.original_html,
         "email_subject": draft.submission.email_subject,
         "content_source": draft.submission.content_source,

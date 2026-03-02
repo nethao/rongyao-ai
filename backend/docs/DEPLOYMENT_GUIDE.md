@@ -305,6 +305,22 @@ services:
 2. 测试网络连接：`curl https://oss-cn-hangzhou.aliyuncs.com`
 3. 检查权限：确认OSS账号有上传权限
 
+### IMAP 连接失败：Temporary failure in name resolution
+
+报错说明容器内无法解析 IMAP 主机名（如 imap.qq.com）。按下面顺序排查：
+
+1. **确认宿主机能解析**：在宿主机执行 `ping -c 1 imap.qq.com`，若失败则先解决本机网络/DNS。
+2. **确认容器内 DNS**：`docker exec backend python3 -c "import socket; print(socket.gethostbyname('imap.qq.com'))"`，若超时或报错说明容器 DNS 异常。
+3. **为 Docker 配置 DNS**（推荐）：在宿主机创建或编辑 `/etc/docker/daemon.json`，增加：
+   ```json
+   {
+     "dns": ["8.8.8.8", "114.114.114.114"]
+   }
+   ```
+   然后执行 `sudo systemctl restart docker`，再重建并启动 backend：  
+   `docker-compose stop backend celery_worker && docker-compose rm -f backend celery_worker && docker-compose up -d backend celery_worker`
+4. **防火墙/网络**：若在内网或受限环境，确认允许容器访问外网 DNS（UDP 53）及 IMAP 端口（如 993）。
+
 ## 性能优化
 
 ### 数据库优化

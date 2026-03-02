@@ -153,6 +153,33 @@ async def get_current_user_info(
     return UserSchema.model_validate(current_user)
 
 
+@router.get("/profile-complete-status")
+async def get_profile_complete_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    编辑人员首次完善状态：是否需强制完成 1 修改密码 2 显示名 3 文编署名映射。
+    管理员始终返回 complete=True。
+    """
+    from sqlalchemy import select, func
+    from app.models.copy_editor_site_mapping import CopyEditorSiteMapping
+
+    if current_user.role != "editor":
+        return {"complete": True, "missing_steps": []}
+
+    missing = []
+    if getattr(current_user, "must_change_password", True):
+        missing.append("password")
+    if not (current_user.display_name and str(current_user.display_name).strip()):
+        missing.append("display_name")
+    r = await db.execute(select(func.count()).select_from(CopyEditorSiteMapping).where(CopyEditorSiteMapping.user_id == current_user.id))
+    if (r.scalar_one() or 0) < 1:
+        missing.append("copy_editor_mapping")
+
+    return {"complete": len(missing) == 0, "missing_steps": missing}
+
+
 @router.post("/change-password", response_model=MessageResponse)
 async def change_password(
     password_data: PasswordChangeRequest,

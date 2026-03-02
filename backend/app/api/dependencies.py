@@ -48,6 +48,16 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    # 强制加载User对象的所有关键属性，避免后续延迟加载导致异步错误
+    # (在_sync_session_lazy_load前加载所有属性)
+    _ = user.id
+    _ = user.username
+    _ = user.role
+    _ = user.display_name
+    _ = user.must_change_password
+    _ = user.created_at
+    _ = user.updated_at
+    
     return user
 
 

@@ -2,11 +2,32 @@
 配置管理服务
 """
 import logging
-from typing import Optional
+import socket
+from typing import Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.system_config import SystemConfig
 from app.utils.encryption import encrypt_value, decrypt_value
+
+# QQ IMAP DNS 解析问题 workaround：强制使用可用 IP
+# 必须在导入 imap_tools 之前 patch
+_IMAP_HOST_OVERRIDE = {
+    'imap.qq.com': '183.47.101.192',
+}
+
+_original_getaddrinfo = socket.getaddrinfo
+
+def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    """修复 QQ IMAP DNS 解析到不可用 IP 的问题"""
+    if host in _IMAP_HOST_OVERRIDE:
+        override_ip = _IMAP_HOST_OVERRIDE[host]
+        logger = logging.getLogger(__name__)
+        logger.debug(f"DNS override: {host} -> {override_ip}")
+        # 返回 IPv4 地址
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (override_ip, port))]
+    return _original_getaddrinfo(host, port, family, type, proto, flags)
+
+socket.getaddrinfo = _patched_getaddrinfo
 
 
 class ConfigService:
@@ -194,29 +215,102 @@ class ConfigService:
             logger = logging.getLogger(__name__)
             logger.error(f"OSS config verification failed: {e}")
             return False
+
+    async def verify_wechat302_config(self) -> Tuple[bool, str]:
+        """验证 302 微信抓取配置"""
+        api_key = await self.get_config("WECHAT302_API_KEY", decrypt=True)
+        enabled = await self.get_config("WECHAT302_ENABLED")
+        base_url = await self.get_config("WECHAT302_BASE_URL")
+        import requests
+
+        enabled_bool = str(enabled or "true").strip().lower() not in {"false", "0", "no", "off"}
+        if not enabled_bool:
+            return True, "302 微信抓取已禁用"
+
+        if not api_key:
+            return False, "302 验证失败：缺少 API Key"
+
+        base = (base_url or "https://api.302.ai").rstrip("/")
+        endpoint = f"{base}/tools/wechat_mp/web/fetch_mp_article_detail_json"
+        headers = {"Authorization": f"Bearer {api_key}"}
+        params = {"url": "https://mp.weixin.qq.com/s/aH8IiY_gwmqOHlq9yxErZw"}
+
+        try:
+            resp = requests.get(endpoint, params=params, headers=headers, timeout=20)
+            if resp.status_code >= 400:
+                return False, f"302 验证失败：HTTP {resp.status_code}"
+            data = resp.json() if resp.content else {}
+            if not isinstance(data, dict) or "code" not in data:
+                return False, "302 验证失败：响应格式异常"
+            return True, "302 配置有效"
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"302 config verification failed: {e}")
+            return False, f"302 验证失败：{str(e)}"
     
-    async def verify_imap_config(self) -> bool:
-        """验证IMAP配置"""
+    async def verify_imap_config(self) -> Tuple[bool, str]:
+        """验证IMAP配置，返回 (是否有效, 提示信息)"""
         host = await self.get_config("IMAP_HOST")
         port = await self.get_config("IMAP_PORT")
         user = await self.get_config("IMAP_USER")
         password = await self.get_config("IMAP_PASSWORD", decrypt=True)
         use_ssl = await self.get_config("IMAP_USE_SSL")
+        timeout_seconds = await self.get_config("IMAP_TIMEOUT_SECONDS")
         
-        if not all([host, user, password]):
-            return False
+        host = (host or "").strip()
+        user = (user or "").strip()
+        if not host:
+            return False, "请填写 IMAP 服务器地址"
+        if not user:
+            return False, "请填写 IMAP 用户名（邮箱）"
+        if not password:
+            return False, "请填写 IMAP 密码或授权码"
         
-        # 实际验证IMAP连接
+        port_int = int(port) if port else 993
+        timeout_int = int(timeout_seconds) if timeout_seconds else 20
+        use_ssl_bool = str(use_ssl).strip().lower() not in {"false", "0", "no", "off"}
+        # 先尝试解析域名，区分「填错地址」和「环境 DNS 问题」
+        import socket
         try:
-            from imap_tools import MailBox
-            port_int = int(port) if port else 993
-            use_ssl_bool = use_ssl != 'false'
-            
-            # 尝试连接
-            with MailBox(host, port_int).login(user, password, initial_folder='INBOX'):
-                pass  # 连接成功
-            return True
+            socket.gethostbyname(host)
+        except (socket.gaierror, OSError) as e:
+            err = str(e).strip()
+            return False, (
+                f"无法解析 IMAP 服务器地址「{host}」。若您确认地址无误（如 imap.qq.com、imap.163.com），"
+                "多半是当前运行环境（Docker 容器）无法访问外网 DNS。请在宿主机为 Docker 配置 DNS："
+                "编辑 /etc/docker/daemon.json 添加 \"dns\": [\"8.8.8.8\", \"114.114.114.114\"]，然后 sudo systemctl restart docker，"
+                "再重建并启动 backend 与 celery_worker 容器。详见部署文档「IMAP 连接失败」故障排查。"
+            )
+        try:
+            from imap_tools import MailBox, MailBoxUnencrypted
+
+            mailbox_cls = MailBox if use_ssl_bool else MailBoxUnencrypted
+            with mailbox_cls(host, port_int, timeout=timeout_int).login(
+                user, password, initial_folder="INBOX"
+            ):
+                pass
+            return True, "IMAP 配置有效，连接成功"
         except Exception as e:
             logger = logging.getLogger(__name__)
             logger.error(f"IMAP config verification failed: {e}")
-            return False
+            err = str(e).strip() or type(e).__name__
+            err_lower = err.lower()
+            if "name resolution" in err.lower() or "errno -3" in err.lower() or "nodename nor servname" in err.lower():
+                return False, (
+                    f"无法解析 IMAP 服务器地址「{host}」。若您确认地址无误，请在宿主机为 Docker 配置 DNS"
+                    "（/etc/docker/daemon.json 添加 \"dns\": [\"8.8.8.8\", \"114.114.114.114\"] 后重启 Docker），"
+                    "再重建 backend/celery_worker 容器。详见部署文档。"
+                )
+            if isinstance(e, (TimeoutError, socket.timeout)) or "timed out" in err_lower or "timeout" in err_lower:
+                return False, (
+                    f"IMAP 连接超时（{timeout_int}秒）。请检查服务器地址/端口、SSL设置、"
+                    "防火墙放行（常见 993）以及服务器到 IMAP 服务的网络连通性。"
+                )
+            if (
+                "authentication" in err_lower
+                or "login failed" in err_lower
+                or "invalid credentials" in err_lower
+                or "auth" in err_lower
+            ):
+                return False, "IMAP 认证失败：请检查邮箱账号、密码/授权码，以及是否开启 IMAP 服务。"
+            return False, f"IMAP 连接失败：{err}"

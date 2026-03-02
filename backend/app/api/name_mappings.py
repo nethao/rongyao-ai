@@ -21,6 +21,7 @@ from app.schemas.name_mapping import (
     CopyEditorSiteMappingSchema,
     CopyEditorSiteMappingCreate,
     CopyEditorSiteMappingUpdate,
+    MyProfileUpdate,
 )
 from app.schemas.auth import MessageResponse, PasswordChangeRequest
 
@@ -47,9 +48,23 @@ async def get_my_profile(
             "username": current_user.username,
             "role": current_user.role,
             "display_name": current_user.display_name,
+            "must_change_password": getattr(current_user, "must_change_password", True),
         },
         "copy_editor_mappings": [CopyEditorSiteMappingSchema(**_copy_editor_with_site_name(x)) for x in mappings],
     }
+
+
+@router.patch("/my/profile", response_model=MessageResponse)
+async def update_my_profile(
+    body: MyProfileUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """当前用户更新自己的显示名（编辑首次完善用）"""
+    if body.display_name is not None:
+        current_user.display_name = (body.display_name or "").strip() or None
+        await db.commit()
+    return MessageResponse(message="保存成功")
 
 
 @router.post("/my/change-password", response_model=MessageResponse)

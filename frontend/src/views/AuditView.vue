@@ -84,6 +84,17 @@
             </div>
           </div>
           <div class="pane-content left-content-wrap">
+            <el-alert
+              title="提示"
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 12px;"
+            >
+              <template #default>
+                <div class="original-tip-text">{{ formattedOriginalContentTip }}</div>
+              </template>
+            </el-alert>
             <!-- 原文标题（只读） -->
             <div class="article-title-section">
               <div class="article-title-readonly">{{ articleTitle }}</div>
@@ -101,7 +112,13 @@
         </div>
 
         <!-- 中间：AI转换内容（Tiptap 编辑器） -->
-        <div class="pane middle-pane">
+        <div
+          class="pane middle-pane"
+          :class="{ 'drop-zone-active': dragOverEditor }"
+          @dragover.prevent="dragOverEditor = true"
+          @dragleave.prevent="dragOverEditor = false"
+          @drop.prevent="onEditorDrop"
+        >
           <div class="pane-header">
             <h3>AI转换内容</h3>
             <div class="pane-actions">
@@ -224,9 +241,17 @@
                 v-for="att in attachments"
                 :key="`${att.type}-${att.id || att.url}`"
                 class="attachment-item"
+                :class="{ 'attachment-item-draggable': att.type === 'image' }"
+                :draggable="att.type === 'image'"
+                @dragstart="onAttachmentDragStart($event, att)"
               >
-                <div class="attachment-icon">
-                  <el-icon v-if="att.type === 'image'"><Picture /></el-icon>
+                <div
+                  class="attachment-icon"
+                  :class="{ 'attachment-icon-preview': att.type === 'image' && att.url }"
+                  @click="att.type === 'image' && att.url && openImagePreview(att)"
+                >
+                  <img v-if="att.type === 'image' && att.url" :src="att.url" class="attachment-thumb" alt="" />
+                  <el-icon v-else-if="att.type === 'image'"><Picture /></el-icon>
                   <img v-else-if="att.type === 'video'" :src="mp4IconUrl" alt="视频" />
                   <img v-else-if="att.type === 'word'" src="/icons/WORD.svg" alt="Word" />
                   <img v-else-if="att.type === 'archive'" :src="archiveIconUrl" alt="压缩包" />
@@ -240,7 +265,15 @@
                   </div>
                 </div>
                 <div class="attachment-actions">
-                  <a :href="att.url" target="_blank">查看</a>
+                  <template v-if="att.type === 'image'">
+                    <a href="#" @click.prevent="openImagePreview(att)">预览</a>
+                    <el-button type="primary" link size="small" @click="insertAttachmentToDraft(att)">
+                      插入到草稿
+                    </el-button>
+                  </template>
+                  <template v-else>
+                    <a :href="att.url" target="_blank">查看</a>
+                  </template>
                 </div>
               </div>
             </div>
@@ -249,6 +282,27 @@
         </div>
       </div>
     </el-card>
+
+    <!-- 图片预览灯箱（含插入到草稿） -->
+    <el-dialog
+      v-model="imagePreviewVisible"
+      title="图片预览"
+      width="80%"
+      top="5vh"
+      destroy-on-close
+      class="image-preview-dialog"
+      @closed="previewAttachment = null"
+    >
+      <div v-if="previewAttachment" class="image-preview-body">
+        <img :src="previewAttachment.url" class="preview-img" alt="预览" />
+        <div class="preview-actions">
+          <el-button type="primary" @click="insertAttachmentToDraft(previewAttachment)">
+            插入到草稿
+          </el-button>
+          <el-button @click="imagePreviewVisible = false">关闭</el-button>
+        </div>
+      </div>
+    </el-dialog>
 
     <!-- 发布对话框 -->
     <el-dialog
@@ -339,7 +393,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, watch, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -373,6 +427,7 @@ const submissionId = ref(null)
 const articleTitle = ref('')
 const contentSource = ref('')
 const originalContent = ref('')
+const emailRawContent = ref('')
 const originalHtml = ref('')
 const editableContent = ref('')
 const editableHtml = ref('')
@@ -382,10 +437,22 @@ const cooperationType = ref('')
 const mediaType = ref('')
 const sourceUnit = ref('')
 
+const formattedOriginalContentTip = computed(() => {
+  const text = (emailRawContent.value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
+  if (!text) {
+    return '抓取邮件原文，格式化后展示在这个提示框内。'
+  }
+  return text.replace(/\n{3,}/g, '\n\n')
+})
+
 // 版本历史
 // 附件
 const attachments = ref([])
 const attachmentRetentionDays = ref(15)
+const imagePreviewVisible = ref(false)
+const previewAttachment = ref(null)
+const dragOverEditor = ref(false)
+const DRAG_IMAGE_URL_KEY = 'application/x-image-url'
 
 // 自动保存定时器
 let autoSaveTimer = null
@@ -494,6 +561,7 @@ const loadDraft = async () => {
     sourceUnit.value = response.source_unit || ''
     console.log('加载草稿，目标站点ID:', targetSiteId.value)
     originalContent.value = response.original_content
+    emailRawContent.value = response.email_raw_content || response.source_url || ''
     currentVersion.value = response.current_version
     hasUnsavedChanges.value = false
 
@@ -917,6 +985,47 @@ const getAttachmentTypeLabel = (type) => {
   return labels[String(type || '').toLowerCase()] || '附件'
 }
 
+// 打开图片预览灯箱
+const openImagePreview = (att) => {
+  if (!att || att.type !== 'image' || !att.url) return
+  previewAttachment.value = att
+  imagePreviewVisible.value = true
+}
+
+// 插入附件图片到编辑器光标处
+const insertAttachmentToDraft = (att) => {
+  if (!att || !att.url) return
+  const editor = tiptapRef.value
+  if (!editor?.insertImageAtCursor) {
+    ElMessage.warning('请使用可视化编辑器后再插入')
+    return
+  }
+  editor.insertImageAtCursor(att.url)
+  ElMessage.success('已插入到光标处')
+  imagePreviewVisible.value = false
+}
+
+// 附件拖拽开始（仅图片）
+const onAttachmentDragStart = (e, att) => {
+  if (att?.type !== 'image' || !att?.url) return
+  e.dataTransfer.setData(DRAG_IMAGE_URL_KEY, att.url)
+  e.dataTransfer.effectAllowed = 'copy'
+}
+
+// 编辑器区域放置：插入图片
+const onEditorDrop = (e) => {
+  dragOverEditor.value = false
+  const url = e.dataTransfer?.getData(DRAG_IMAGE_URL_KEY)
+  if (!url) return
+  const editor = tiptapRef.value
+  if (!editor?.insertImageAtCursor) {
+    ElMessage.warning('请切换到可视化编辑器后再拖拽插入')
+    return
+  }
+  editor.insertImageAtCursor(url)
+  ElMessage.success('已插入到光标处')
+}
+
 const formatFileSize = (size) => {
   if (!size || Number.isNaN(size)) return '-'
   const bytes = Number(size)
@@ -1194,6 +1303,63 @@ onBeforeUnmount(() => {
   height: 20px;
 }
 
+.attachment-icon.attachment-icon-preview {
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.attachment-icon .attachment-thumb {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.attachment-item-draggable {
+  cursor: grab;
+}
+
+.attachment-item-draggable:active {
+  cursor: grabbing;
+}
+
+.drop-zone-active.middle-pane {
+  outline: 2px dashed #409eff;
+  outline-offset: -2px;
+  background-color: #ecf5ff;
+}
+
+.image-preview-dialog .image-preview-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.image-preview-dialog .preview-img {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.image-preview-dialog .preview-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.attachment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.attachment-actions a {
+  font-size: 12px;
+  color: #409eff;
+  text-decoration: none;
+}
+
 .attachment-info {
   flex: 1;
   min-width: 0;
@@ -1211,12 +1377,6 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #909399;
   margin-top: 2px;
-}
-
-.attachment-actions a {
-  font-size: 12px;
-  color: #409eff;
-  text-decoration: none;
 }
 
 .content-card {
@@ -1378,6 +1538,14 @@ onBeforeUnmount(() => {
   padding: 24px;
   color: #909399;
   text-align: center;
+}
+
+.original-tip-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 140px;
+  overflow: auto;
+  line-height: 1.6;
 }
 
 /* AI改写进度条 */

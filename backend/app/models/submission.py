@@ -15,6 +15,8 @@ class Submission(Base):
     email_subject = Column(String(255))
     email_from = Column(String(255))
     email_date = Column(DateTime(timezone=True))
+    email_raw_content = Column(Text)  # 邮件原文（用于审核页提示）
+    source_url = Column(String(1000))  # 邮件中提取的原始链接（微信/美篇/外链）
     original_content = Column(Text, nullable=False)
     original_html = Column(Text)  # 原始HTML（保留公众号排版）
     doc_file_path = Column(String(500))

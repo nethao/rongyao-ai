@@ -1,0 +1,184 @@
+/**
+ * 微信公众号后端采集模块 (Node.js)
+ * 依赖安装: npm install axios cheerio turndown
+ * 建议运行环境: Node.js 16+
+ */
+
+const axios = require('axios');
+const cheerio = require('cheerio');
+const TurndownService = require('turndown');
+
+class WeChatIngester {
+    constructor() {
+        this.queue = [];
+        this.isProcessing = false;
+        // 配置常见的 User-Agent 池，每次请求随机切换
+        this.userAgents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
+        ];
+    }
+
+    /**
+     * 接口 1: 将邮件中提取的 URL 加入抓取队列
+     * 您的系统在解析完邮件后，调用此方法即可
+     */
+    addJob(url, metadata = {}) {
+        this.queue.push({ url, metadata, retries: 0 });
+        console.log(`[队列] 新增采集任务，当前排队数量: ${this.queue.length}`);
+        this.startProcessing();
+    }
+
+    /**
+     * 核心队列处理器 (确保永远只有一个任务在执行，避免并发触发风控)
+     */
+    async startProcessing() {
+        if (this.isProcessing || this.queue.length === 0) return;
+        this.isProcessing = true;
+
+        while (this.queue.length > 0) {
+            const job = this.queue.shift();
+            console.log(`[执行] 开始抓取: ${job.url}`);
+
+            try {
+                const articleData = await this.fetchAndParse(job.url);
+                
+                // ！！！在这里对接您系统的“草稿箱”写入逻辑 ！！！
+                await this.saveToDraft(articleData, job.metadata);
+                console.log(`[成功] 文章已存入草稿箱: ${articleData.title}`);
+
+            } catch (error) {
+                console.error(`[失败] 抓取异常: ${error.message}`);
+                // 失败重试逻辑
+                if (job.retries < 3) {
+                    job.retries++;
+                    console.log(`[重试] 任务放回队列，当前重试次数: ${job.retries}`);
+                    this.queue.push(job);
+                } else {
+                    console.error(`[放弃] 任务已达最大重试次数，已丢弃: ${job.url}`);
+                    // 可选：发送告警邮件给自己
+                }
+            }
+
+            // 智能防封锁：随机休眠 2 到 5 分钟 (120,000ms - 300,000ms)
+            // 100篇文章 * 平均3.5分钟 = 350分钟 (约6小时处理完)，极度安全！
+            if (this.queue.length > 0) {
+                const delayMs = Math.floor(Math.random() * (300000 - 120000 + 1)) + 120000;
+                console.log(`[防封锁休眠] 等待 ${(delayMs/1000).toFixed(0)} 秒后处理下一篇...`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+
+        this.isProcessing = false;
+    }
+
+    /**
+     * 核心抓取与清洗引擎 (Cheerio 轻量级解析)
+     */
+    async fetchAndParse(url) {
+        // 随机抽取 User-Agent
+        const randomUA = this.userAgents[Math.floor(Math.random() * this.userAgents.length)];
+
+        // 发起 HTTP 请求获取源码
+        // 方案A：直接请求微信 (配合休眠，大概率安全)
+        // 方案B：如果您之前配置了 Caddy 代理，可以将 url 替换为 `https://nb.ll7ll.top/wx-proxy/...`
+        const response = await axios.get(url, {
+            headers: {
+                'User-Agent': randomUA,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive'
+            },
+            timeout: 15000 // 15秒超时，防止阻塞队列
+        });
+
+        const html = response.data;
+
+        // 验证是否被风控拦截
+        if (html.includes('为了保护你的网络安全，请输入验证码')) {
+            throw new Error('IP已被微信临时封锁，要求验证码');
+        }
+
+        // 使用 Cheerio 加载 DOM，极低内存占用
+        const $ = cheerio.load(html);
+
+        const contentNode = $('#js_content');
+        if (contentNode.length === 0) {
+            throw new Error('未找到正文，可能文章已被删除或结构改变');
+        }
+
+        // 获取标题和作者
+        const title = $('#activity-name').text().trim();
+        const author = $('#js_name').text().trim();
+
+        // --- 核心：清洗正文 ---
+        // 1. 强制可见
+        contentNode.css('visibility', 'visible');
+        
+        // 2. 移除冗余的 JS 和隐藏样式
+        contentNode.find('script, style, noscript').remove();
+
+        // 3. 处理图片防盗链和占位符
+        contentNode.find('img').each((i, el) => {
+            const $img = $(el);
+            let realSrc = $img.attr('data-src');
+            
+            if (realSrc) {
+                // 可选进阶：在这里，您可以编写一个函数，把 realSrc 下载到您的服务器，
+                // 然后将这里的 src 替换为您自己服务器上的图片 URL，彻底摆脱防盗链。
+                // $img.attr('src', await uploadToMyServer(realSrc));
+                
+                $img.attr('src', realSrc);
+                $img.removeAttr('data-src');
+            }
+        });
+
+        // 提取纯净的 HTML
+        let cleanHtml = contentNode.html();
+
+        // 可选：将 HTML 转换为 Markdown (如果您系统草稿箱支持 Markdown)
+        const turndownService = new TurndownService({ headingStyle: 'atx' });
+        const markdown = turndownService.turndown(cleanHtml);
+
+        return {
+            title,
+            author,
+            originalUrl: url,
+            html: cleanHtml,
+            markdown: markdown,
+            fetchTime: new Date()
+        };
+    }
+
+    /**
+     * 模拟存入您的业务系统草稿箱
+     */
+    async saveToDraft(articleData, metadata) {
+        // TODO: 替换为您实际的数据库写入代码 (如 MySQL, MongoDB 或调用您系统的 API)
+        // console.log(`[DB Mock] INSERT INTO drafts (title, content) VALUES ('${articleData.title}', ...)`);
+        return Promise.resolve();
+    }
+}
+
+module.exports = new WeChatIngester();
+
+// ==========================================
+// 接入示例 (模拟您的系统接收到邮件后的动作)
+// ==========================================
+/*
+const ingester = require('./wechat_ingester');
+
+// 假设系统读取邮件提取到了 3 个链接
+const urlsFromEmail = [
+    'https://mp.weixin.qq.com/s/xxxxxx1',
+    'https://mp.weixin.qq.com/s/xxxxxx2',
+    'https://mp.weixin.qq.com/s/xxxxxx3'
+];
+
+// 直接丢给模块，它会在后台排队、慢速抓取并写入草稿，完全不阻塞您的主程序
+urlsFromEmail.forEach(url => {
+    ingester.addJob(url, { source: 'editor@email.com' });
+});
+*/

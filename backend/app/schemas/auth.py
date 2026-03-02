@@ -32,6 +32,7 @@ class User(UserBase):
     """用户响应模型"""
     id: int
     display_name: Optional[str] = None  # 显示名（中文姓名），认领标签优先用此
+    must_change_password: bool = True  # 是否必须修改密码（编辑首次登录用）
     created_at: datetime
     
     class Config:

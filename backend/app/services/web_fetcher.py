@@ -4,6 +4,7 @@
 """
 import html as html_module
 import ipaddress
+import os
 import re
 import socket
 from urllib.parse import urlparse, urljoin
@@ -140,7 +141,14 @@ def _bs4_article_extract(html: str, url: str):
 class WebFetcher:
     """网页内容抓取器"""
     
-    def __init__(self):
+    def __init__(
+        self,
+        wechat302_api_key: Optional[str] = None,
+        wechat302_enabled: Optional[bool] = None,
+        wechat302_base_url: Optional[str] = None,
+        weixin_cookie: Optional[str] = None,
+        weixin_proxy_url: Optional[str] = None,
+    ):
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -149,10 +157,226 @@ class WebFetcher:
             'Referer': 'https://mp.weixin.qq.com/',
         })
         self.session.max_redirects = 3
-    
+        self.chromium_executable_path = os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH")
+        self.wechat302_api_key = (
+            wechat302_api_key
+            if wechat302_api_key is not None
+            else os.getenv("WECHAT302_API_KEY", "")
+        ).strip()
+        if wechat302_enabled is None:
+            env_enabled = os.getenv("WECHAT302_ENABLED", "true")
+            self.wechat302_enabled = str(env_enabled).strip().lower() not in {"false", "0", "no", "off"}
+        else:
+            self.wechat302_enabled = bool(wechat302_enabled)
+        self.wechat302_base_url = (
+            wechat302_base_url
+            if wechat302_base_url is not None
+            else os.getenv("WECHAT302_BASE_URL", "https://api.302.ai")
+        ).rstrip("/")
+        self.weixin_cookie = (
+            weixin_cookie
+            if weixin_cookie is not None
+            else os.getenv("WEIXIN_COOKIE", "")
+        ).strip()
+        self.weixin_proxy_url = (
+            weixin_proxy_url
+            if weixin_proxy_url is not None
+            else os.getenv("WEIXIN_PROXY_URL", "")
+        ).strip()
+        if self.weixin_proxy_url:
+            self.session.proxies.update({
+                "http": self.weixin_proxy_url,
+                "https": self.weixin_proxy_url,
+            })
+
+    def _chromium_launch_kwargs(self, *, headless: bool = True, args: Optional[List[str]] = None) -> dict:
+        kwargs = {
+            "headless": headless,
+            "env": {
+                **os.environ,
+                "HOME": "/tmp",
+                "XDG_CONFIG_HOME": "/tmp",
+                "XDG_CACHE_HOME": "/tmp",
+            }
+        }
+        if args:
+            kwargs["args"] = args
+        if self.chromium_executable_path:
+            kwargs["executable_path"] = self.chromium_executable_path
+        return kwargs
+
+    def _looks_like_wechat_block_page(self, text: Optional[str]) -> bool:
+        if not text:
+            return True
+        sample = (text or "").strip()
+        markers = [
+            "环境异常",
+            "完成验证后即可继续访问",
+            "去验证",
+            "安全验证",
+            "访问过于频繁",
+            "weixin official accounts platform",
+            "requiring captcha",
+        ]
+        low = sample.lower()
+        return any((m in sample) or (m in low) for m in markers)
+
+    def _clean_wechat_text_blocks(self, blocks: List[str]) -> str:
+        """清洗并去重微信正文文本块，避免 302 返回重复段落直接入库。"""
+        cleaned: List[str] = []
+        for raw in blocks:
+            text = (raw or "").replace("\r", "\n")
+            text = re.sub(r"\n{3,}", "\n\n", text)
+            text = re.sub(r"[ \t]+", " ", text).strip()
+            if not text:
+                continue
+
+            # 去掉常见署名尾注，避免污染正文
+            if text.startswith(("编辑：", "初审：", "终审：")) or "END编辑" in text:
+                continue
+
+            dup_idx = None
+            for i, old in enumerate(cleaned):
+                if text == old:
+                    dup_idx = i
+                    break
+                if len(text) > 80 and text in old:
+                    dup_idx = i
+                    break
+                if len(old) > 80 and old in text:
+                    dup_idx = i
+                    break
+
+            if dup_idx is None:
+                cleaned.append(text)
+            else:
+                # 若新段更长，替换旧段
+                if len(text) > len(cleaned[dup_idx]) and cleaned[dup_idx] in text:
+                    cleaned[dup_idx] = text
+
+        return "\n\n".join(cleaned).strip()
+
+    async def fetch_weixin_article_async(self, url: str) -> Tuple[Optional[str], Optional[str], Optional[str], List[str]]:
+        """抓取微信公众号文章（异步版本）"""
+        import asyncio
+        # 优先使用 302 微信接口
+        api302_result = self._fetch_with_302ai(url)
+        if api302_result[0] or api302_result[1]:
+            logger.info(f"302接口抓取微信文章成功: {url}")
+            return api302_result
+
+        for attempt in range(3):
+            try:
+                logger.info(f"尝试抓取微信文章 (第{attempt+1}次): {url}")
+                result = await self._fetch_weixin_playwright(url)
+                if result[0] or result[1]:
+                    return result
+                logger.warning(f"第{attempt+1}次抓取未获取到内容")
+            except Exception as e:
+                err = str(e).lower()
+                logger.error(f"第{attempt+1}次抓取失败: {e}")
+                # Chromium 进程异常时直接降级，避免无效重试
+                if "target page, context or browser has been closed" in err or "sigtrap" in err:
+                    logger.warning("检测到浏览器进程异常，直接降级到 requests 兜底")
+                    break
+                if attempt < 2:
+                    await asyncio.sleep(2 * (attempt + 1))
+
+        logger.error("所有抓取尝试均失败")
+        # 兜底：requests
+        return self._fetch_weixin_requests(url)
+
+    def _fetch_with_302ai(self, url: str) -> Tuple[Optional[str], Optional[str], Optional[str], List[str]]:
+        """使用 302.AI 微信接口抓取正文"""
+        if not self.wechat302_enabled:
+            return None, None, None, []
+
+        try:
+            _validate_url(url)
+        except Exception as e:
+            logger.warning(f"302接口抓取前URL校验失败: {e}")
+            return None, None, None, []
+
+        try:
+            endpoint = f"{self.wechat302_base_url}/tools/wechat_mp/web/fetch_mp_article_detail_json"
+            headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+            if self.wechat302_api_key:
+                token = self.wechat302_api_key
+                headers["Authorization"] = token if token.lower().startswith("bearer ") else f"Bearer {token}"
+
+            response = self.session.get(endpoint, params={"url": url}, headers=headers, timeout=45)
+            response.raise_for_status()
+            data = response.json() if response.content else {}
+            payload = data.get("data") if isinstance(data, dict) else None
+            if not payload:
+                logger.warning(f"302接口返回无data字段: {data}")
+                return None, None, None, []
+
+            title = (payload.get("title") or "").strip() or None
+            article = ((payload.get("content") or {}).get("article") or {})
+            raw_content = ((payload.get("content") or {}).get("raw_content") or [])
+            text_blocks = [
+                (item or {}).get("text", "").strip()
+                for item in raw_content
+                if isinstance(item, dict) and (item.get("text") or "").strip()
+            ]
+            full_text = self._clean_wechat_text_blocks(text_blocks) or (article.get("full_text") or "").strip()
+            if len(full_text) < 80 or self._looks_like_wechat_block_page(full_text):
+                logger.warning("302接口返回内容过短或命中风控页")
+                return None, None, None, []
+
+            images: List[str] = []
+            seen_src = set()
+            for item in raw_content:
+                if not isinstance(item, dict):
+                    continue
+                for img in (item.get("images") or []):
+                    src = (img or {}).get("src")
+                    if src and src not in seen_src:
+                        seen_src.add(src)
+                        images.append(src)
+            # 回退到 article.images
+            if not images:
+                for img in article.get("images") or []:
+                    src = (img or {}).get("src")
+                    if src and src not in seen_src:
+                        seen_src.add(src)
+                        images.append(src)
+
+            # 统一输出为 Markdown 文本，并显式挂载图片语法，便于后续占位符映射
+            markdown_text = full_text
+            if images:
+                image_md = "\n".join(f"![图片{i}]({src})" for i, src in enumerate(images, start=1))
+                markdown_text = f"{full_text}\n\n{image_md}"
+
+            # 用 sections 生成可读 HTML 预览，回退到 full_text
+            sections = article.get("sections") or []
+            if sections:
+                blocks = []
+                for sec in sections:
+                    sec_title = html_module.escape((sec or {}).get("title") or "")
+                    sec_text = html_module.escape((sec or {}).get("text") or "").replace("\n", "<br>")
+                    if sec_title:
+                        blocks.append(f"<h3>{sec_title}</h3>")
+                    if sec_text:
+                        blocks.append(f"<p>{sec_text}</p>")
+                body = "".join(blocks) or f"<p>{html_module.escape(full_text).replace(chr(10), '<br>')}</p>"
+            else:
+                body = f"<p>{html_module.escape(full_text).replace(chr(10), '<br>')}</p>"
+
+            original_html = (
+                '<div class="api302-fallback" style="line-height:1.8;">'
+                + body +
+                '</div>'
+            )
+            return title, markdown_text, original_html, images
+        except Exception as e:
+            logger.error(f"302接口抓取失败: {e}")
+            return None, None, None, []
+
     def fetch_weixin_article(self, url: str) -> Tuple[Optional[str], Optional[str], Optional[str], List[str]]:
         """
-        抓取微信公众号文章
+        抓取微信公众号文章（使用 Playwright 绕过反爬验证）
         
         Args:
             url: 公众号文章链接
@@ -160,11 +384,215 @@ class WebFetcher:
         Returns:
             (标题, Markdown内容, 原始HTML, 图片URL列表)
         """
+        import asyncio
+        try:
+            asyncio.get_running_loop()
+            logger.warning("在已运行事件循环中调用了同步微信抓取，回退到 requests 方案")
+            return self._fetch_weixin_requests(url)
+        except RuntimeError:
+            return asyncio.run(self.fetch_weixin_article_async(url))
+    
+    async def _fetch_weixin_playwright(self, url: str) -> Tuple[Optional[str], Optional[str], Optional[str], List[str]]:
+        """使用 Playwright 抓取微信文章"""
+        try:
+            from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+        except ImportError:
+            logger.warning("Playwright 未安装，回退到 requests")
+            return self._fetch_weixin_requests(url)
+        
+        _validate_url(url)
+        
+        browser = None
+        context = None
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(**self._chromium_launch_kwargs(
+                    headless=True,
+                    args=[
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-blink-features=AutomationControlled',
+                        '--disable-dev-shm-usage',
+                        '--disable-web-security',
+                        '--disable-features=IsolateOrigins,site-per-process',
+                        '--disable-gpu',
+                        '--disable-software-rasterizer',
+                        '--disable-crashpad',
+                        '--disable-crash-reporter',
+                        '--no-first-run',
+                        '--no-zygote',
+                        '--disable-extensions'
+                    ]
+                ))
+                context = await browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    viewport={'width': 1920, 'height': 1080},
+                    locale='zh-CN',
+                    timezone_id='Asia/Shanghai',
+                    extra_http_headers={
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Referer': 'https://mp.weixin.qq.com/',
+                    }
+                )
+                if self.weixin_cookie:
+                    await context.add_cookies([{
+                        "name": part.split("=", 1)[0].strip(),
+                        "value": part.split("=", 1)[1].strip(),
+                        "domain": ".qq.com",
+                        "path": "/",
+                        "httpOnly": False,
+                        "secure": True,
+                    } for part in self.weixin_cookie.split(";") if "=" in part])
+                
+                # 隐藏webdriver特征 - 更完整的反检测脚本
+                await context.add_init_script("""
+                    // 覆盖 navigator.webdriver
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                    
+                    // 覆盖 chrome 对象
+                    window.chrome = {
+                        runtime: {}
+                    };
+                    
+                    // 覆盖 permissions
+                    const originalQuery = window.navigator.permissions.query;
+                    window.navigator.permissions.query = (parameters) => (
+                        parameters.name === 'notifications' ?
+                            Promise.resolve({ state: Notification.permission }) :
+                            originalQuery(parameters)
+                    );
+                    
+                    // 覆盖 plugins
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [1, 2, 3, 4, 5]
+                    });
+                    
+                    // 覆盖 languages
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['zh-CN', 'zh', 'en']
+                    });
+                """)
+                
+                page = await context.new_page()
+                
+                # 设置更长的默认超时
+                page.set_default_timeout(60000)
+                
+                try:
+                    # 直接访问目标文章，使用load而不是domcontentloaded
+                    await page.goto(url, timeout=45000, wait_until='load')
+                except PlaywrightTimeout:
+                    logger.warning("页面加载超时，尝试继续解析...")
+                    # 超时也继续尝试解析，可能页面已经部分加载
+                except Exception as e:
+                    logger.error(f"页面导航失败: {e}")
+                    return None, None, None, []
+                
+                # 等待关键元素出现
+                try:
+                    await page.wait_for_selector('h1.rich_media_title', timeout=8000)
+                except PlaywrightTimeout:
+                    logger.error("等待标题元素超时")
+                    page_content = await page.content()
+                    if '环境异常' in page_content or '验证' in page_content or '安全验证' in page_content:
+                        logger.error("微信返回验证页面，回退到requests方案")
+                        return self._fetch_weixin_requests(url)
+                    else:
+                        logger.error("未找到文章标题元素，可能被反爬拦截")
+                    return None, None, None, []
+                except Exception as e:
+                    logger.error(f"等待元素失败: {e}")
+                    return None, None, None, []
+                
+                # 额外等待内容加载
+                await page.wait_for_timeout(1500)
+                
+                # 检查是否有标题元素
+                title_elem = await page.query_selector('h1.rich_media_title')
+                if not title_elem:
+                    logger.error("未找到文章标题元素")
+                    return None, None, None, []
+                
+                # 提取标题
+                title = await title_elem.text_content()
+                title = title.strip() if title else None
+                
+                # 提取正文
+                content_elem = await page.query_selector('div.rich_media_content')
+                if not content_elem:
+                    logger.error("未找到文章内容")
+                    return None, None, None, []
+                
+                # 获取原始 HTML
+                original_html = await content_elem.inner_html()
+                
+                # 提取图片 URL
+                images = []
+                img_elements = await content_elem.query_selector_all('img')
+                for img in img_elements:
+                    img_url = await img.get_attribute('data-src') or await img.get_attribute('src')
+                    if img_url:
+                        images.append(img_url)
+                
+                # 提取文本内容
+                text_content = await content_elem.text_content()
+                markdown_content = text_content.strip() if text_content else ""
+                if self._looks_like_wechat_block_page(markdown_content):
+                    logger.warning("Playwright抓取内容命中微信风控页")
+                    return None, None, None, []
+                
+                logger.info(f"成功抓取公众号文章: {title}, 图片数: {len(images)}")
+                return title, markdown_content, original_html, images
+                
+        except Exception as e:
+            logger.error(f"Playwright抓取异常: {e}")
+            return None, None, None, []
+        finally:
+            if context:
+                try:
+                    await context.close()
+                except:
+                    pass
+            if browser:
+                try:
+                    await browser.close()
+                except:
+                    pass
+    
+    def _fetch_weixin_requests(self, url: str) -> Tuple[Optional[str], Optional[str], Optional[str], List[str]]:
+        """使用 requests 抓取微信文章（备用方案）"""
         try:
             _validate_url(url)
-            response = self.session.get(url, timeout=30)
+            
+            # 使用更真实的请求头
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Referer': 'https://mp.weixin.qq.com/',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+            }
+            if self.weixin_cookie:
+                headers["Cookie"] = self.weixin_cookie
+            
+            # 增加超时时间到30秒
+            response = self.session.get(url, timeout=30, headers=headers)
             response.raise_for_status()
             response.encoding = 'utf-8'
+            
+            # 检查是否是验证页面
+            if self._looks_like_wechat_block_page(response.text) or len(response.text) < 5000:
+                logger.warning("微信返回验证页面或内容过短，requests方案失败")
+                return None, None, None, []
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
@@ -207,16 +635,19 @@ class WebFetcher:
             
             # 提取Markdown内容（包含图片占位符）
             markdown_content = content_copy.get_text(separator='\n', strip=True)
+            if self._looks_like_wechat_block_page(markdown_content):
+                logger.warning("requests抓取内容命中微信风控页")
+                return None, None, None, []
             
             # 将占位符替换为Markdown图片语法
             for i, img_url in enumerate(images):
                 markdown_content = markdown_content.replace(f'[IMAGE_{i}]', f'\n![图片{i+1}]({img_url})\n')
             
-            logger.info(f"成功抓取公众号文章: {title}, 图片数: {len(images)}")
+            logger.info(f"成功抓取公众号文章(requests): {title}, 图片数: {len(images)}")
             return title, markdown_content, original_html, images
             
         except Exception as e:
-            logger.error(f"抓取公众号文章失败: {e}")
+            logger.error(f"抓取公众号文章失败(requests): {e}")
             return None, None, None, []
     
     def _fetch_meipian_with_requests(self, url: str) -> Tuple[Optional[str], Optional[str], List[str], Optional[str]]:
@@ -229,7 +660,7 @@ class WebFetcher:
         except ValueError:
             return None, None, [], None
         try:
-            resp = self.session.get(url, timeout=20)
+            resp = self.session.get(url, timeout=15)
             resp.raise_for_status()
             resp.encoding = "utf-8"
         except Exception as e:
@@ -294,7 +725,7 @@ class WebFetcher:
             return None
         try:
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
+                browser = await p.chromium.launch(**self._chromium_launch_kwargs(headless=True))
                 page = await browser.new_page()
                 await page.goto(url, wait_until="networkidle", timeout=30000)
                 await page.wait_for_timeout(2500)
@@ -425,7 +856,7 @@ class WebFetcher:
             from playwright.async_api import async_playwright
 
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
+                browser = await p.chromium.launch(**self._chromium_launch_kwargs(headless=True))
                 page = await browser.new_page()
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 await page.wait_for_timeout(3000)
@@ -495,7 +926,7 @@ class WebFetcher:
             图片二进制数据
         """
         try:
-            response = self.session.get(url, timeout=30)
+            response = self.session.get(url, timeout=15)
             response.raise_for_status()
             return response.content
         except Exception as e:
@@ -659,7 +1090,7 @@ class WebFetcher:
             from urllib.parse import urljoin
             
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
+                browser = await p.chromium.launch(**self._chromium_launch_kwargs(headless=True))
                 page = await browser.new_page()
                 
                 await page.goto(url, wait_until='networkidle', timeout=30000)

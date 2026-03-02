@@ -25,19 +25,45 @@ celery_app.conf.update(
     worker_max_tasks_per_child=1000,
 )
 
-# 定时任务配置
-celery_app.conf.beat_schedule = {
-    # 每5分钟抓取邮件
-    "fetch-emails-every-5-minutes": {
-        "task": "email.fetch_emails",
-        "schedule": 300.0,  # 5分钟
-    },
-    # 每天凌晨2点执行清理任务
-    "daily-cleanup-at-2am": {
-        "task": "cleanup.daily_cleanup",
-        "schedule": crontab(hour=2, minute=0),
-    },
-}
+# 动态加载定时任务配置
+def get_beat_schedule():
+    """从数据库读取定时任务配置"""
+    try:
+        import asyncio
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
+        from app.services.config_service import ConfigService
+        
+        async def _get_interval():
+            engine = create_async_engine(settings.DATABASE_URL, echo=False)
+            async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as session:
+                cs = ConfigService(session)
+                interval = await cs.get_config("AUTO_FETCH_INTERVAL_MINUTES")
+                await engine.dispose()
+                return int(interval) if interval else 0
+        
+        interval = asyncio.run(_get_interval())
+    except Exception:
+        interval = 0  # 默认禁用
+    
+    schedule = {}
+    
+    # 自动抓取邮件（如果启用）
+    if interval > 0:
+        schedule["auto-fetch-emails"] = {
+            "task": "fetch_emails",
+            "schedule": interval * 60.0,  # 转换为秒
+        }
+    
+    return schedule
+
+# 初始化定时任务
+celery_app.conf.beat_schedule = get_beat_schedule()
+
+def reload_beat_schedule():
+    """重新加载定时任务配置"""
+    celery_app.conf.beat_schedule = get_beat_schedule()
 
 # 导入任务模块（在应用启动时自动发现）
 celery_app.autodiscover_tasks(["app.tasks"])

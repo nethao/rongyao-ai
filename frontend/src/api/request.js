@@ -15,10 +15,13 @@ const request = axios.create({
 // 请求拦截器
 request.interceptors.request.use(
   config => {
-    // 添加认证令牌
-    const token = getToken()
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+    // 验证码接口不携带 token，避免未登录/过期 token 导致 401 影响验证码显示
+    const isCaptcha = (config.url || '').includes('/auth/captcha')
+    if (!isCaptcha) {
+      const token = getToken()
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`
+      }
     }
     return config
   },
@@ -59,7 +62,10 @@ request.interceptors.response.use(
           ElMessage.error(data.detail || '请求失败')
       }
     } else {
-      ElMessage.error('网络错误，请检查网络连接')
+      const msg = error.code === 'ECONNABORTED'
+        ? '请求超时，请检查网络或稍后重试'
+        : (error.message || '网络错误，请检查网络连接')
+      ElMessage.error(msg)
     }
     
     return Promise.reject(error)

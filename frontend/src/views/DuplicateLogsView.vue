@@ -36,38 +36,38 @@
         v-loading="loading"
         :data="items"
         style="width: 100%"
-        stripe
       >
-        <el-table-column prop="created_at" label="记录时间" width="170">
-          <template #default="{ row }">
-            {{ formatTime(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="duplicate_type" label="类型" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.duplicate_type === 'skipped' ? 'info' : 'warning'" size="small">
-              {{ row.duplicate_type === 'skipped' ? '跳过' : '被替换' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="email_subject" label="邮件主题" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="email_from" label="发件人" width="140" show-overflow-tooltip />
-        <el-table-column prop="email_date" label="邮件时间" width="160">
+        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column prop="email_date" label="投稿时间" width="160" show-overflow-tooltip>
           <template #default="{ row }">
             {{ formatTime(row.email_date) }}
           </template>
         </el-table-column>
-        <el-table-column prop="cooperation_type" label="合作方式" width="90">
+        <el-table-column prop="email_from" label="采编" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ row.cooperation_type === 'partner' ? '合作' : row.cooperation_type === 'free' ? '投稿' : '-' }}
+            {{ row.email_from || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="media_type" label="媒体" width="90">
+        <el-table-column label="合作方式" width="100">
           <template #default="{ row }">
-            {{ mediaLabel(row.media_type) }}
+            <el-tag v-if="row.cooperation_type === 'free'" type="info" size="small">投稿</el-tag>
+            <el-tag v-else-if="row.cooperation_type === 'partner'" type="success" size="small">合作</el-tag>
+            <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="source_unit" label="来稿单位" width="130" show-overflow-tooltip />
+        <el-table-column label="媒体" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.media_type" size="small">{{ mediaLabel(row.media_type) }}</el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="source_unit" label="来稿单位" width="150" show-overflow-tooltip />
+        <el-table-column prop="email_subject" label="标题" min-width="200" show-overflow-tooltip />
+        <el-table-column label="类型" width="120">
+          <template #default="{ row }">
+            <el-tag type="danger" size="small">重复稿件无效</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="effective_submission_id" label="有效稿ID" width="100" align="center">
           <template #default="{ row }">
             <el-link
@@ -81,21 +81,15 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="superseded_submission_id" label="被替换稿ID" width="110" align="center">
-          <template #default="{ row }">
-            <span v-if="row.superseded_submission_id">#{{ row.superseded_submission_id }}</span>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
       </el-table>
 
-      <div class="pagination-row">
+      <div class="pagination-container">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
-          :page-sizes="[10, 20, 50]"
+          :page-sizes="[10, 20, 50, 100]"
           :total="total"
-          layout="total, sizes, prev, pager, next"
+          layout="total, sizes, prev, pager, next, jumper"
           @size-change="handleSizeChange"
           @current-change="handlePageChange"
         />
@@ -200,9 +194,10 @@ onMounted(() => loadData())
 }
 .table-card {
   margin-top: 16px;
+  min-height: 400px;
 }
-.pagination-row {
-  margin-top: 16px;
+.pagination-container {
+  margin-top: 20px;
   display: flex;
   justify-content: flex-end;
 }
